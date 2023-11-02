@@ -126,7 +126,7 @@ lead to a loss of confidentiality, integrity, or availability.
    See <https://nodejs.org/api/modules.html#all-together>.
 
 Any unexpected behavior from the data manipulation from Node.js Internal
-functions may be considered a vulnerability if they are expoitable via
+functions may be considered a vulnerability if they are exploitable via
 untrusted resources.
 
 In addition to addressing vulnerabilities based on the above, the project works
@@ -144,7 +144,7 @@ the community they pose.
 #### Improper Certificate Validation (CWE-295)
 
 * Node.js provides APIs to validate handling of Subject Alternative Names (SANs)
-  in certficates used to connect to a TLS/SSL endpoint. If certificates can be
+  in certificates used to connect to a TLS/SSL endpoint. If certificates can be
   crafted which result in incorrect validation by the Node.js APIs that is
   considered a vulnerability.
 
@@ -198,6 +198,12 @@ the community they pose.
   artifact, it is not considered a vulnerability if the size of
   that artifact is large enough to impact performance or
   cause the runtime to run out of resources.
+
+## Assessing experimental features reports
+
+Experimental features are eligible to reports as any other stable feature of
+Node.js. They will also be susceptible to receiving the same severity score
+as any other stable feature.
 
 ## Receiving security updates
 

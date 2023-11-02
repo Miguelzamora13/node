@@ -44,7 +44,7 @@ class FakeInput extends EventEmitter {
 function isWarned(emitter) {
   for (const name in emitter) {
     const listeners = emitter[name];
-    if (listeners.warned) return true;
+    if (listeners && listeners.warned) return true;
   }
   return false;
 }
@@ -1067,8 +1067,7 @@ for (let i = 0; i < 12; i++) {
     rli.question('foo?', common.mustCall((answer) => {
       assert.strictEqual(answer, 'baz');
     }));
-    rli.question('bar?', common.mustNotCall(() => {
-    }));
+    rli.question('bar?', common.mustNotCall());
     rli.write('baz\n');
     rli.close();
   }

@@ -7,6 +7,7 @@
 #include "node_metadata.h"
 #include "node_mutex.h"
 #include "node_worker.h"
+#include "permission/permission.h"
 #include "util.h"
 
 #ifdef _WIN32
@@ -26,7 +27,7 @@
 constexpr int NODE_REPORT_VERSION = 3;
 constexpr int NANOS_PER_SEC = 1000 * 1000 * 1000;
 constexpr double SEC_PER_MICROS = 1e-6;
-constexpr int MAX_FRAME_COUNT = 10;
+constexpr int MAX_FRAME_COUNT = node::kMaxFrameCountForLogging;
 
 namespace node {
 using node::worker::Worker;
@@ -66,6 +67,7 @@ static void PrintJavaScriptErrorStack(JSONWriter* writer,
                                       Isolate* isolate,
                                       Local<Value> error,
                                       const char* trigger);
+static void PrintEmptyJavaScriptStack(JSONWriter* writer);
 static void PrintJavaScriptStack(JSONWriter* writer,
                                  Isolate* isolate,
                                  const char* trigger);
@@ -184,6 +186,10 @@ static void WriteNodeReport(Isolate* isolate,
 
     // Report V8 Heap and Garbage Collector information
     PrintGCStatistics(&writer, isolate);
+  } else {
+    writer.json_objectstart("javascriptStack");
+    PrintEmptyJavaScriptStack(&writer);
+    writer.json_objectend();  // the end of 'javascriptStack'
   }
 
   // Report native stack backtrace
@@ -401,7 +407,7 @@ static void PrintJavaScriptErrorProperties(JSONWriter* writer,
         continue;
       }
       node::Utf8Value k(isolate, key);
-      if (!strcmp(*k, "stack") || !strcmp(*k, "message")) continue;
+      if (k == "stack" || k == "message") continue;
       node::Utf8Value v(isolate, value_string);
       writer->json_keyvalue(k.ToStringView(), v.ToStringView());
     }
@@ -452,13 +458,13 @@ static void PrintEmptyJavaScriptStack(JSONWriter* writer) {
 static void PrintJavaScriptStack(JSONWriter* writer,
                                  Isolate* isolate,
                                  const char* trigger) {
-  // Can not capture the stacktrace when the isolate is in a OOM state.
-  if (!strcmp(trigger, "OOMError")) {
+  HandleScope scope(isolate);
+  Local<v8::StackTrace> stack;
+  if (!GetCurrentStackTrace(isolate, MAX_FRAME_COUNT).ToLocal(&stack)) {
     PrintEmptyJavaScriptStack(writer);
     return;
   }
 
-  HandleScope scope(isolate);
   RegisterState state;
   state.pc = nullptr;
   state.fp = &state;
@@ -468,18 +474,6 @@ static void PrintJavaScriptStack(JSONWriter* writer,
   SampleInfo info;
   void* samples[MAX_FRAME_COUNT];
   isolate->GetStackSample(state, samples, MAX_FRAME_COUNT, &info);
-
-  constexpr StackTrace::StackTraceOptions stack_trace_options =
-      static_cast<StackTrace::StackTraceOptions>(
-          StackTrace::kDetailed |
-          StackTrace::kExposeFramesAcrossSecurityOrigins);
-  Local<StackTrace> stack = StackTrace::CurrentStackTrace(
-      isolate, MAX_FRAME_COUNT, stack_trace_options);
-
-  if (stack->GetFrameCount() == 0) {
-    PrintEmptyJavaScriptStack(writer);
-    return;
-  }
 
   writer->json_keyvalue("message", trigger);
   writer->json_arraystart("stack");
@@ -850,7 +844,13 @@ std::string TriggerNodeReport(Isolate* isolate,
   // Determine the required report filename. In order of priority:
   //   1) supplied on API 2) configured on startup 3) default generated
   if (!name.empty()) {
-    // Filename was specified as API parameter.
+    // we may not always be in a great state when generating a node report
+    // allow for the case where we don't have an env
+    if (env != nullptr) {
+      THROW_IF_INSUFFICIENT_PERMISSIONS(
+          env, permission::PermissionScope::kFileSystemWrite, name, name);
+      // Filename was specified as API parameter.
+    }
     filename = name;
   } else {
     std::string report_filename;
@@ -864,6 +864,13 @@ std::string TriggerNodeReport(Isolate* isolate,
     } else {
       filename = *DiagnosticFilename(
           env != nullptr ? env->thread_id() : 0, "report", "json");
+    }
+    if (env != nullptr) {
+      THROW_IF_INSUFFICIENT_PERMISSIONS(
+          env,
+          permission::PermissionScope::kFileSystemWrite,
+          std::string_view(Environment::GetCwd(env->exec_path())),
+          filename);
     }
   }
 

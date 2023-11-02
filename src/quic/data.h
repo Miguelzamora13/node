@@ -16,6 +16,7 @@ namespace quic {
 
 struct Path final : public ngtcp2_path {
   Path(const SocketAddress& local, const SocketAddress& remote);
+  inline operator ngtcp2_path*() { return this; }
 };
 
 struct PathStorage final : public ngtcp2_path_storage {
@@ -129,7 +130,7 @@ class QuicError final : public MemoryRetainer {
   const uint8_t* reason_c_str() const;
 
   std::string reason_;
-  ngtcp2_connection_close_error error_;
+  ngtcp2_connection_close_error error_ = ngtcp2_connection_close_error();
   const ngtcp2_connection_close_error* ptr_ = nullptr;
 };
 

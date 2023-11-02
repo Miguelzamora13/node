@@ -57,9 +57,152 @@
     (out) = v8::type::New((buffer), (byte_offset), (length));                  \
   } while (0)
 
-namespace v8impl {
+void napi_env__::InvokeFinalizerFromGC(v8impl::RefTracker* finalizer) {
+  if (module_api_version != NAPI_VERSION_EXPERIMENTAL) {
+    EnqueueFinalizer(finalizer);
+  } else {
+    // The experimental code calls finalizers immediately to release native
+    // objects as soon as possible. In that state any code that may affect GC
+    // state causes a fatal error. To work around this issue the finalizer code
+    // can call node_api_post_finalizer.
+    auto restore_state = node::OnScopeLeave(
+        [this, saved = in_gc_finalizer] { in_gc_finalizer = saved; });
+    in_gc_finalizer = true;
+    finalizer->Finalize();
+  }
+}
 
+namespace v8impl {
 namespace {
+
+template <typename CCharType, typename StringMaker>
+napi_status NewString(napi_env env,
+                      const CCharType* str,
+                      size_t length,
+                      napi_value* result,
+                      StringMaker string_maker) {
+  CHECK_ENV(env);
+  env->CheckGCAccess();
+  if (length > 0) CHECK_ARG(env, str);
+  CHECK_ARG(env, result);
+  RETURN_STATUS_IF_FALSE(
+      env, (length == NAPI_AUTO_LENGTH) || length <= INT_MAX, napi_invalid_arg);
+
+  auto isolate = env->isolate;
+  auto str_maybe = string_maker(isolate);
+  CHECK_MAYBE_EMPTY(env, str_maybe, napi_generic_failure);
+  *result = v8impl::JsValueFromV8LocalValue(str_maybe.ToLocalChecked());
+  return napi_clear_last_error(env);
+}
+
+template <typename CharType, typename CreateAPI, typename StringMaker>
+napi_status NewExternalString(napi_env env,
+                              CharType* str,
+                              size_t length,
+                              napi_finalize finalize_callback,
+                              void* finalize_hint,
+                              napi_value* result,
+                              bool* copied,
+                              CreateAPI create_api,
+                              StringMaker string_maker) {
+  napi_status status;
+#if defined(V8_ENABLE_SANDBOX)
+  env->CheckGCAccess();
+  status = create_api(env, str, length, result);
+  if (status == napi_ok) {
+    if (copied != nullptr) {
+      *copied = true;
+    }
+    if (finalize_callback) {
+      env->CallFinalizer(
+          finalize_callback, static_cast<CharType*>(str), finalize_hint);
+    }
+  }
+#else
+  status = NewString(env, str, length, result, string_maker);
+  if (status == napi_ok && copied != nullptr) {
+    *copied = false;
+  }
+#endif  // V8_ENABLE_SANDBOX
+  return status;
+}
+
+class TrackedStringResource : public Finalizer, RefTracker {
+ public:
+  TrackedStringResource(napi_env env,
+                        napi_finalize finalize_callback,
+                        void* data,
+                        void* finalize_hint)
+      : Finalizer(env, finalize_callback, data, finalize_hint) {
+    Link(finalize_callback == nullptr ? &env->reflist
+                                      : &env->finalizing_reflist);
+  }
+
+ protected:
+  // The only time Finalize() gets called before Dispose() is if the
+  // environment is dying. Finalize() expects that the item will be unlinked,
+  // so we do it here. V8 will still call Dispose() on us later, so we don't do
+  // any deleting here. We just null out env_ to avoid passing a stale pointer
+  // to the user's finalizer when V8 does finally call Dispose().
+  void Finalize() override {
+    Unlink();
+    env_ = nullptr;
+  }
+
+  ~TrackedStringResource() {
+    if (finalize_callback_ == nullptr) return;
+    if (env_ == nullptr) {
+      // The environment is dead. Call the finalizer directly.
+      finalize_callback_(nullptr, finalize_data_, finalize_hint_);
+    } else {
+      // The environment is still alive. Let's remove ourselves from its list
+      // of references and call the user's finalizer.
+      Unlink();
+      env_->CallFinalizer(finalize_callback_, finalize_data_, finalize_hint_);
+    }
+  }
+};
+
+class ExternalOneByteStringResource
+    : public v8::String::ExternalOneByteStringResource,
+      TrackedStringResource {
+ public:
+  ExternalOneByteStringResource(napi_env env,
+                                char* string,
+                                const size_t length,
+                                napi_finalize finalize_callback,
+                                void* finalize_hint)
+      : TrackedStringResource(env, finalize_callback, string, finalize_hint),
+        string_(string),
+        length_(length) {}
+
+  const char* data() const override { return string_; }
+  size_t length() const override { return length_; }
+
+ private:
+  const char* string_;
+  const size_t length_;
+};
+
+class ExternalStringResource : public v8::String::ExternalStringResource,
+                               TrackedStringResource {
+ public:
+  ExternalStringResource(napi_env env,
+                         char16_t* string,
+                         const size_t length,
+                         napi_finalize finalize_callback,
+                         void* finalize_hint)
+      : TrackedStringResource(env, finalize_callback, string, finalize_hint),
+        string_(reinterpret_cast<uint16_t*>(string)),
+        length_(length) {}
+
+  const uint16_t* data() const override { return string_; }
+  size_t length() const override { return length_; }
+
+ private:
+  const uint16_t* string_;
+  const size_t length_;
+};
 
 inline napi_status V8NameFromPropertyDescriptor(
     napi_env env,
@@ -457,12 +600,77 @@ inline napi_status Wrap(napi_env env,
   return GET_RETURN_STATUS(env);
 }
 
+// In JavaScript, weak references can be created for object types (Object,
+// Function, and external Object) and for local symbols that are created with
+// the `Symbol` function call. Global symbols created with the `Symbol.for`
+// method cannot be weak references because they are never collected.
+//
+// Currently, V8 has no API to detect if a symbol is local or global.
+// Until we have a V8 API for it, we consider that all symbols can be weak.
+// This matches the current Node-API behavior.
+inline bool CanBeHeldWeakly(v8::Local<v8::Value> value) {
+  return value->IsObject() || value->IsSymbol();
+}
+
 }  // end of anonymous namespace
 
 void Finalizer::ResetFinalizer() {
   finalize_callback_ = nullptr;
   finalize_data_ = nullptr;
   finalize_hint_ = nullptr;
+}
+
+TrackedFinalizer::TrackedFinalizer(napi_env env,
+                                   napi_finalize finalize_callback,
+                                   void* finalize_data,
+                                   void* finalize_hint)
+    : Finalizer(env, finalize_callback, finalize_data, finalize_hint),
+      RefTracker() {
+  Link(finalize_callback == nullptr ? &env->reflist : &env->finalizing_reflist);
+}
+
+TrackedFinalizer* TrackedFinalizer::New(napi_env env,
+                                        napi_finalize finalize_callback,
+                                        void* finalize_data,
+                                        void* finalize_hint) {
+  return new TrackedFinalizer(
+      env, finalize_callback, finalize_data, finalize_hint);
+}
+
+// When a TrackedFinalizer is being deleted, it may have been queued to call its
+// finalizer.
+TrackedFinalizer::~TrackedFinalizer() {
+  // Remove from the env's tracked list.
+  Unlink();
+  // Try to remove the finalizer from the scheduled second pass callback.
+  env_->DequeueFinalizer(this);
+}
+
+void TrackedFinalizer::Finalize() {
+  FinalizeCore(/*deleteMe:*/ true);
+}
+
+void TrackedFinalizer::FinalizeCore(bool deleteMe) {
+  // Swap out the field finalize_callback so that it can not be accidentally
+  // called more than once.
+  napi_finalize finalize_callback = finalize_callback_;
+  void* finalize_data = finalize_data_;
+  void* finalize_hint = finalize_hint_;
+  ResetFinalizer();
+
+  // Either the RefBase is going to be deleted in the finalize_callback or not,
+  // it should be removed from the tracked list.
+  Unlink();
+  // If the finalize_callback is present, it should either delete the
+  // derived RefBase, or the RefBase ownership was set to Ownership::kRuntime
+  // and the deleteMe parameter is true.
+  if (finalize_callback != nullptr) {
+    env_->CallFinalizer(finalize_callback, finalize_data, finalize_hint);
+  }
+
+  if (deleteMe) {
+    delete this;
+  }
 }
 
 // Wrapper around v8impl::Persistent that implements reference counting.
@@ -472,20 +680,9 @@ RefBase::RefBase(napi_env env,
                  napi_finalize finalize_callback,
                  void* finalize_data,
                  void* finalize_hint)
-    : Finalizer(env, finalize_callback, finalize_data, finalize_hint),
+    : TrackedFinalizer(env, finalize_callback, finalize_data, finalize_hint),
       refcount_(initial_refcount),
-      ownership_(ownership) {
-  Link(finalize_callback == nullptr ? &env->reflist : &env->finalizing_reflist);
-}
-
-// When a RefBase is being deleted, it may have been queued to call its
-// finalizer.
-RefBase::~RefBase() {
-  // Remove from the env's tracked list.
-  Unlink();
-  // Try to remove the finalizer from the scheduled second pass callback.
-  env_->DequeueFinalizer(this);
-}
+      ownership_(ownership) {}
 
 RefBase* RefBase::New(napi_env env,
                       uint32_t initial_refcount,
@@ -521,37 +718,16 @@ uint32_t RefBase::RefCount() {
 }
 
 void RefBase::Finalize() {
-  Ownership ownership = ownership_;
-  // Swap out the field finalize_callback so that it can not be accidentally
-  // called more than once.
-  napi_finalize finalize_callback = finalize_callback_;
-  void* finalize_data = finalize_data_;
-  void* finalize_hint = finalize_hint_;
-  ResetFinalizer();
-
-  // Either the RefBase is going to be deleted in the finalize_callback or not,
-  // it should be removed from the tracked list.
-  Unlink();
-  // 1. If the finalize_callback is present, it should either delete the
-  //    RefBase, or set ownership with Ownership::kRuntime.
-  // 2. If the finalizer is not present, the RefBase can be deleted after the
-  //    call.
-  if (finalize_callback != nullptr) {
-    env_->CallFinalizer(finalize_callback, finalize_data, finalize_hint);
-    // No access to `this` after finalize_callback is called.
-  }
-
   // If the RefBase is not Ownership::kRuntime, userland code should delete it.
-  // Now delete it if it is Ownership::kRuntime.
-  if (ownership == Ownership::kRuntime) {
-    delete this;
-  }
+  // Delete it if it is Ownership::kRuntime.
+  FinalizeCore(/*deleteMe:*/ ownership_ == Ownership::kRuntime);
 }
 
 template <typename... Args>
 Reference::Reference(napi_env env, v8::Local<v8::Value> value, Args&&... args)
     : RefBase(env, std::forward<Args>(args)...),
-      persistent_(env->isolate, value) {
+      persistent_(env->isolate, value),
+      can_be_weak_(CanBeHeldWeakly(value)) {
   if (RefCount() == 0) {
     SetWeak();
   }
@@ -585,7 +761,7 @@ uint32_t Reference::Ref() {
     return 0;
   }
   uint32_t refcount = RefBase::Ref();
-  if (refcount == 1) {
+  if (refcount == 1 && can_be_weak_) {
     persistent_.ClearWeak();
   }
   return refcount;
@@ -625,7 +801,11 @@ void Reference::Finalize() {
 // Mark the reference as weak and eligible for collection
 // by the gc.
 void Reference::SetWeak() {
-  persistent_.SetWeak(this, WeakCallback, v8::WeakCallbackType::kParameter);
+  if (can_be_weak_) {
+    persistent_.SetWeak(this, WeakCallback, v8::WeakCallbackType::kParameter);
+  } else {
+    persistent_.Reset();
+  }
 }
 
 // The N-API finalizer callback may make calls into the engine. V8's heap is
@@ -635,7 +815,7 @@ void Reference::WeakCallback(const v8::WeakCallbackInfo<Reference>& data) {
   Reference* reference = data.GetParameter();
   // The reference must be reset during the weak callback as the API protocol.
   reference->persistent_.Reset();
-  reference->env_->EnqueueFinalizer(reference);
+  reference->env_->InvokeFinalizerFromGC(reference);
 }
 
 }  // end of namespace v8impl
@@ -665,6 +845,7 @@ static const char* error_messages[] = {
     "A detachable arraybuffer was expected",
     "Main thread would deadlock",
     "External buffers are not allowed",
+    "Cannot run JavaScript",
 };
 
 napi_status NAPI_CDECL napi_get_last_error_info(
@@ -676,7 +857,7 @@ napi_status NAPI_CDECL napi_get_last_error_info(
   // message in the `napi_status` enum each time a new error message is added.
   // We don't have a napi_status_last as this would result in an ABI
   // change each time a message was added.
-  const int last_status = napi_no_external_buffers_allowed;
+  const int last_status = napi_cannot_run_js;
 
   static_assert(NAPI_ARRAYSIZE(error_messages) == last_status + 1,
                 "Count of error messages must match count of error values");
@@ -924,7 +1105,8 @@ napi_status NAPI_CDECL napi_set_property(napi_env env,
 
   v8::Maybe<bool> set_maybe = obj->Set(context, k, val);
 
-  RETURN_STATUS_IF_FALSE(env, set_maybe.FromMaybe(false), napi_generic_failure);
+  RETURN_STATUS_IF_FALSE_WITH_PREAMBLE(
+      env, set_maybe.FromMaybe(false), napi_generic_failure);
   return GET_RETURN_STATUS(env);
 }
 
@@ -944,7 +1126,7 @@ napi_status NAPI_CDECL napi_has_property(napi_env env,
   v8::Local<v8::Value> k = v8impl::V8LocalValueFromJsValue(key);
   v8::Maybe<bool> has_maybe = obj->Has(context, k);
 
-  CHECK_MAYBE_NOTHING(env, has_maybe, napi_generic_failure);
+  CHECK_MAYBE_NOTHING_WITH_PREAMBLE(env, has_maybe, napi_generic_failure);
 
   *result = has_maybe.FromMaybe(false);
   return GET_RETURN_STATUS(env);
@@ -966,7 +1148,7 @@ napi_status NAPI_CDECL napi_get_property(napi_env env,
 
   auto get_maybe = obj->Get(context, k);
 
-  CHECK_MAYBE_EMPTY(env, get_maybe, napi_generic_failure);
+  CHECK_MAYBE_EMPTY_WITH_PREAMBLE(env, get_maybe, napi_generic_failure);
 
   v8::Local<v8::Value> val = get_maybe.ToLocalChecked();
   *result = v8impl::JsValueFromV8LocalValue(val);
@@ -986,7 +1168,7 @@ napi_status NAPI_CDECL napi_delete_property(napi_env env,
 
   CHECK_TO_OBJECT(env, context, obj, object);
   v8::Maybe<bool> delete_maybe = obj->Delete(context, k);
-  CHECK_MAYBE_NOTHING(env, delete_maybe, napi_generic_failure);
+  CHECK_MAYBE_NOTHING_WITH_PREAMBLE(env, delete_maybe, napi_generic_failure);
 
   if (result != nullptr) *result = delete_maybe.FromMaybe(false);
 
@@ -1008,7 +1190,7 @@ napi_status NAPI_CDECL napi_has_own_property(napi_env env,
   v8::Local<v8::Value> k = v8impl::V8LocalValueFromJsValue(key);
   RETURN_STATUS_IF_FALSE(env, k->IsName(), napi_name_expected);
   v8::Maybe<bool> has_maybe = obj->HasOwnProperty(context, k.As<v8::Name>());
-  CHECK_MAYBE_NOTHING(env, has_maybe, napi_generic_failure);
+  CHECK_MAYBE_NOTHING_WITH_PREAMBLE(env, has_maybe, napi_generic_failure);
   *result = has_maybe.FromMaybe(false);
 
   return GET_RETURN_STATUS(env);
@@ -1033,7 +1215,8 @@ napi_status NAPI_CDECL napi_set_named_property(napi_env env,
 
   v8::Maybe<bool> set_maybe = obj->Set(context, key, val);
 
-  RETURN_STATUS_IF_FALSE(env, set_maybe.FromMaybe(false), napi_generic_failure);
+  RETURN_STATUS_IF_FALSE_WITH_PREAMBLE(
+      env, set_maybe.FromMaybe(false), napi_generic_failure);
   return GET_RETURN_STATUS(env);
 }
 
@@ -1054,7 +1237,7 @@ napi_status NAPI_CDECL napi_has_named_property(napi_env env,
 
   v8::Maybe<bool> has_maybe = obj->Has(context, key);
 
-  CHECK_MAYBE_NOTHING(env, has_maybe, napi_generic_failure);
+  CHECK_MAYBE_NOTHING_WITH_PREAMBLE(env, has_maybe, napi_generic_failure);
 
   *result = has_maybe.FromMaybe(false);
   return GET_RETURN_STATUS(env);
@@ -1078,7 +1261,7 @@ napi_status NAPI_CDECL napi_get_named_property(napi_env env,
 
   auto get_maybe = obj->Get(context, key);
 
-  CHECK_MAYBE_EMPTY(env, get_maybe, napi_generic_failure);
+  CHECK_MAYBE_EMPTY_WITH_PREAMBLE(env, get_maybe, napi_generic_failure);
 
   v8::Local<v8::Value> val = get_maybe.ToLocalChecked();
   *result = v8impl::JsValueFromV8LocalValue(val);
@@ -1100,7 +1283,8 @@ napi_status NAPI_CDECL napi_set_element(napi_env env,
   v8::Local<v8::Value> val = v8impl::V8LocalValueFromJsValue(value);
   auto set_maybe = obj->Set(context, index, val);
 
-  RETURN_STATUS_IF_FALSE(env, set_maybe.FromMaybe(false), napi_generic_failure);
+  RETURN_STATUS_IF_FALSE_WITH_PREAMBLE(
+      env, set_maybe.FromMaybe(false), napi_generic_failure);
 
   return GET_RETURN_STATUS(env);
 }
@@ -1119,7 +1303,7 @@ napi_status NAPI_CDECL napi_has_element(napi_env env,
 
   v8::Maybe<bool> has_maybe = obj->Has(context, index);
 
-  CHECK_MAYBE_NOTHING(env, has_maybe, napi_generic_failure);
+  CHECK_MAYBE_NOTHING_WITH_PREAMBLE(env, has_maybe, napi_generic_failure);
 
   *result = has_maybe.FromMaybe(false);
   return GET_RETURN_STATUS(env);
@@ -1139,7 +1323,7 @@ napi_status NAPI_CDECL napi_get_element(napi_env env,
 
   auto get_maybe = obj->Get(context, index);
 
-  CHECK_MAYBE_EMPTY(env, get_maybe, napi_generic_failure);
+  CHECK_MAYBE_EMPTY_WITH_PREAMBLE(env, get_maybe, napi_generic_failure);
 
   *result = v8impl::JsValueFromV8LocalValue(get_maybe.ToLocalChecked());
   return GET_RETURN_STATUS(env);
@@ -1156,7 +1340,7 @@ napi_status NAPI_CDECL napi_delete_element(napi_env env,
 
   CHECK_TO_OBJECT(env, context, obj, object);
   v8::Maybe<bool> delete_maybe = obj->Delete(context, index);
-  CHECK_MAYBE_NOTHING(env, delete_maybe, napi_generic_failure);
+  CHECK_MAYBE_NOTHING_WITH_PREAMBLE(env, delete_maybe, napi_generic_failure);
 
   if (result != nullptr) *result = delete_maybe.FromMaybe(false);
 
@@ -1204,9 +1388,8 @@ napi_define_properties(napi_env env,
       auto define_maybe =
           obj->DefineProperty(context, property_name, descriptor);
 
-      if (!define_maybe.FromMaybe(false)) {
-        return napi_set_last_error(env, napi_invalid_arg);
-      }
+      RETURN_STATUS_IF_FALSE_WITH_PREAMBLE(
+          env, define_maybe.FromMaybe(false), napi_invalid_arg);
     } else if (p->method != nullptr) {
       v8::Local<v8::Function> method;
       STATUS_CALL(v8impl::FunctionCallbackWrapper::NewFunction(
@@ -1219,23 +1402,28 @@ napi_define_properties(napi_env env,
       auto define_maybe =
           obj->DefineProperty(context, property_name, descriptor);
 
-      if (!define_maybe.FromMaybe(false)) {
-        return napi_set_last_error(env, napi_generic_failure);
-      }
+      RETURN_STATUS_IF_FALSE_WITH_PREAMBLE(
+          env, define_maybe.FromMaybe(false), napi_generic_failure);
     } else {
       v8::Local<v8::Value> value = v8impl::V8LocalValueFromJsValue(p->value);
+      v8::Maybe<bool> define_maybe = v8::Just(false);
 
-      v8::PropertyDescriptor descriptor(value,
-                                        (p->attributes & napi_writable) != 0);
-      descriptor.set_enumerable((p->attributes & napi_enumerable) != 0);
-      descriptor.set_configurable((p->attributes & napi_configurable) != 0);
+      if ((p->attributes & napi_enumerable) &&
+          (p->attributes & napi_writable) &&
+          (p->attributes & napi_configurable)) {
+        // Use a fast path for this type of data property.
+        define_maybe = obj->CreateDataProperty(context, property_name, value);
+      } else {
+        v8::PropertyDescriptor descriptor(value,
+                                          (p->attributes & napi_writable) != 0);
+        descriptor.set_enumerable((p->attributes & napi_enumerable) != 0);
+        descriptor.set_configurable((p->attributes & napi_configurable) != 0);
 
-      auto define_maybe =
-          obj->DefineProperty(context, property_name, descriptor);
-
-      if (!define_maybe.FromMaybe(false)) {
-        return napi_set_last_error(env, napi_invalid_arg);
+        define_maybe = obj->DefineProperty(context, property_name, descriptor);
       }
+
+      RETURN_STATUS_IF_FALSE_WITH_PREAMBLE(
+          env, define_maybe.FromMaybe(false), napi_invalid_arg);
     }
   }
 
@@ -1280,6 +1468,7 @@ napi_status NAPI_CDECL napi_is_array(napi_env env,
                                      napi_value value,
                                      bool* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
 
@@ -1332,6 +1521,7 @@ napi_status NAPI_CDECL napi_get_prototype(napi_env env,
   v8::Local<v8::Object> obj;
   CHECK_TO_OBJECT(env, context, obj, object);
 
+  // This doesn't invokes Proxy's [[GetPrototypeOf]] handler.
   v8::Local<v8::Value> val = obj->GetPrototype();
   *result = v8impl::JsValueFromV8LocalValue(val);
   return GET_RETURN_STATUS(env);
@@ -1339,6 +1529,7 @@ napi_status NAPI_CDECL napi_get_prototype(napi_env env,
 
 napi_status NAPI_CDECL napi_create_object(napi_env env, napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   *result = v8impl::JsValueFromV8LocalValue(v8::Object::New(env->isolate));
@@ -1348,6 +1539,7 @@ napi_status NAPI_CDECL napi_create_object(napi_env env, napi_value* result) {
 
 napi_status NAPI_CDECL napi_create_array(napi_env env, napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   *result = v8impl::JsValueFromV8LocalValue(v8::Array::New(env->isolate));
@@ -1359,6 +1551,7 @@ napi_status NAPI_CDECL napi_create_array_with_length(napi_env env,
                                                      size_t length,
                                                      napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   *result =
@@ -1371,68 +1564,95 @@ napi_status NAPI_CDECL napi_create_string_latin1(napi_env env,
                                                  const char* str,
                                                  size_t length,
                                                  napi_value* result) {
-  CHECK_ENV(env);
-  if (length > 0) CHECK_ARG(env, str);
-  CHECK_ARG(env, result);
-  RETURN_STATUS_IF_FALSE(
-      env, (length == NAPI_AUTO_LENGTH) || length <= INT_MAX, napi_invalid_arg);
-
-  auto isolate = env->isolate;
-  auto str_maybe =
-      v8::String::NewFromOneByte(isolate,
-                                 reinterpret_cast<const uint8_t*>(str),
-                                 v8::NewStringType::kNormal,
-                                 length);
-  CHECK_MAYBE_EMPTY(env, str_maybe, napi_generic_failure);
-
-  *result = v8impl::JsValueFromV8LocalValue(str_maybe.ToLocalChecked());
-  return napi_clear_last_error(env);
+  return v8impl::NewString(env, str, length, result, [&](v8::Isolate* isolate) {
+    return v8::String::NewFromOneByte(isolate,
+                                      reinterpret_cast<const uint8_t*>(str),
+                                      v8::NewStringType::kNormal,
+                                      length);
+  });
 }
 
 napi_status NAPI_CDECL napi_create_string_utf8(napi_env env,
                                                const char* str,
                                                size_t length,
                                                napi_value* result) {
-  CHECK_ENV(env);
-  if (length > 0) CHECK_ARG(env, str);
-  CHECK_ARG(env, result);
-  RETURN_STATUS_IF_FALSE(
-      env, (length == NAPI_AUTO_LENGTH) || length <= INT_MAX, napi_invalid_arg);
-
-  auto isolate = env->isolate;
-  auto str_maybe = v8::String::NewFromUtf8(
-      isolate, str, v8::NewStringType::kNormal, static_cast<int>(length));
-  CHECK_MAYBE_EMPTY(env, str_maybe, napi_generic_failure);
-  *result = v8impl::JsValueFromV8LocalValue(str_maybe.ToLocalChecked());
-  return napi_clear_last_error(env);
+  return v8impl::NewString(env, str, length, result, [&](v8::Isolate* isolate) {
+    return v8::String::NewFromUtf8(
+        isolate, str, v8::NewStringType::kNormal, static_cast<int>(length));
+  });
 }
 
 napi_status NAPI_CDECL napi_create_string_utf16(napi_env env,
                                                 const char16_t* str,
                                                 size_t length,
                                                 napi_value* result) {
-  CHECK_ENV(env);
-  if (length > 0) CHECK_ARG(env, str);
-  CHECK_ARG(env, result);
-  RETURN_STATUS_IF_FALSE(
-      env, (length == NAPI_AUTO_LENGTH) || length <= INT_MAX, napi_invalid_arg);
+  return v8impl::NewString(env, str, length, result, [&](v8::Isolate* isolate) {
+    return v8::String::NewFromTwoByte(isolate,
+                                      reinterpret_cast<const uint16_t*>(str),
+                                      v8::NewStringType::kNormal,
+                                      length);
+  });
+}
 
-  auto isolate = env->isolate;
-  auto str_maybe =
-      v8::String::NewFromTwoByte(isolate,
-                                 reinterpret_cast<const uint16_t*>(str),
-                                 v8::NewStringType::kNormal,
-                                 length);
-  CHECK_MAYBE_EMPTY(env, str_maybe, napi_generic_failure);
+napi_status NAPI_CDECL
+node_api_create_external_string_latin1(napi_env env,
+                                       char* str,
+                                       size_t length,
+                                       napi_finalize finalize_callback,
+                                       void* finalize_hint,
+                                       napi_value* result,
+                                       bool* copied) {
+  return v8impl::NewExternalString(
+      env,
+      str,
+      length,
+      finalize_callback,
+      finalize_hint,
+      result,
+      copied,
+      napi_create_string_latin1,
+      [&](v8::Isolate* isolate) {
+        if (length == NAPI_AUTO_LENGTH) {
+          length = (std::string_view(str)).length();
+        }
+        auto resource = new v8impl::ExternalOneByteStringResource(
+            env, str, length, finalize_callback, finalize_hint);
+        return v8::String::NewExternalOneByte(isolate, resource);
+      });
+}
 
-  *result = v8impl::JsValueFromV8LocalValue(str_maybe.ToLocalChecked());
-  return napi_clear_last_error(env);
+napi_status NAPI_CDECL
+node_api_create_external_string_utf16(napi_env env,
+                                      char16_t* str,
+                                      size_t length,
+                                      napi_finalize finalize_callback,
+                                      void* finalize_hint,
+                                      napi_value* result,
+                                      bool* copied) {
+  return v8impl::NewExternalString(
+      env,
+      str,
+      length,
+      finalize_callback,
+      finalize_hint,
+      result,
+      copied,
+      napi_create_string_utf16,
+      [&](v8::Isolate* isolate) {
+        if (length == NAPI_AUTO_LENGTH) {
+          length = (std::u16string_view(str)).length();
+        }
+        auto resource = new v8impl::ExternalStringResource(
+            env, str, length, finalize_callback, finalize_hint);
+        return v8::String::NewExternalTwoByte(isolate, resource);
+      });
 }
 
 napi_status NAPI_CDECL napi_create_double(napi_env env,
                                           double value,
                                           napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   *result =
@@ -1445,6 +1665,7 @@ napi_status NAPI_CDECL napi_create_int32(napi_env env,
                                          int32_t value,
                                          napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   *result =
@@ -1457,6 +1678,7 @@ napi_status NAPI_CDECL napi_create_uint32(napi_env env,
                                           uint32_t value,
                                           napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   *result = v8impl::JsValueFromV8LocalValue(
@@ -1469,6 +1691,7 @@ napi_status NAPI_CDECL napi_create_int64(napi_env env,
                                          int64_t value,
                                          napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   *result = v8impl::JsValueFromV8LocalValue(
@@ -1481,6 +1704,7 @@ napi_status NAPI_CDECL napi_create_bigint_int64(napi_env env,
                                                 int64_t value,
                                                 napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   *result =
@@ -1493,6 +1717,7 @@ napi_status NAPI_CDECL napi_create_bigint_uint64(napi_env env,
                                                  uint64_t value,
                                                  napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   *result = v8impl::JsValueFromV8LocalValue(
@@ -1507,6 +1732,7 @@ napi_status NAPI_CDECL napi_create_bigint_words(napi_env env,
                                                 const uint64_t* words,
                                                 napi_value* result) {
   NAPI_PREAMBLE(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, words);
   CHECK_ARG(env, result);
 
@@ -1527,6 +1753,7 @@ napi_status NAPI_CDECL napi_get_boolean(napi_env env,
                                         bool value,
                                         napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   v8::Isolate* isolate = env->isolate;
@@ -1544,6 +1771,7 @@ napi_status NAPI_CDECL napi_create_symbol(napi_env env,
                                           napi_value description,
                                           napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   v8::Isolate* isolate = env->isolate;
@@ -1566,6 +1794,7 @@ napi_status NAPI_CDECL node_api_symbol_for(napi_env env,
                                            size_t length,
                                            napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   napi_value js_description_string;
@@ -1611,6 +1840,7 @@ napi_status NAPI_CDECL napi_create_error(napi_env env,
                                          napi_value msg,
                                          napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, msg);
   CHECK_ARG(env, result);
 
@@ -1631,6 +1861,7 @@ napi_status NAPI_CDECL napi_create_type_error(napi_env env,
                                               napi_value msg,
                                               napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, msg);
   CHECK_ARG(env, result);
 
@@ -1651,6 +1882,7 @@ napi_status NAPI_CDECL napi_create_range_error(napi_env env,
                                                napi_value msg,
                                                napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, msg);
   CHECK_ARG(env, result);
 
@@ -1671,6 +1903,7 @@ napi_status NAPI_CDECL node_api_create_syntax_error(napi_env env,
                                                     napi_value msg,
                                                     napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, msg);
   CHECK_ARG(env, result);
 
@@ -1692,6 +1925,7 @@ napi_status NAPI_CDECL napi_typeof(napi_env env,
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
 
@@ -1731,6 +1965,7 @@ napi_status NAPI_CDECL napi_typeof(napi_env env,
 
 napi_status NAPI_CDECL napi_get_undefined(napi_env env, napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   *result = v8impl::JsValueFromV8LocalValue(v8::Undefined(env->isolate));
@@ -1740,6 +1975,7 @@ napi_status NAPI_CDECL napi_get_undefined(napi_env env, napi_value* result) {
 
 napi_status NAPI_CDECL napi_get_null(napi_env env, napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   *result = v8impl::JsValueFromV8LocalValue(v8::Null(env->isolate));
@@ -1785,6 +2021,7 @@ napi_status NAPI_CDECL napi_get_new_target(napi_env env,
   CHECK_ENV(env);
   CHECK_ARG(env, cbinfo);
   CHECK_ARG(env, result);
+  env->CheckGCAccess();
 
   v8impl::CallbackWrapper* info =
       reinterpret_cast<v8impl::CallbackWrapper*>(cbinfo);
@@ -1818,19 +2055,16 @@ napi_status NAPI_CDECL napi_call_function(napi_env env,
       argc,
       reinterpret_cast<v8::Local<v8::Value>*>(const_cast<napi_value*>(argv)));
 
-  if (try_catch.HasCaught()) {
-    return napi_set_last_error(env, napi_pending_exception);
-  } else {
-    if (result != nullptr) {
-      CHECK_MAYBE_EMPTY(env, maybe, napi_generic_failure);
-      *result = v8impl::JsValueFromV8LocalValue(maybe.ToLocalChecked());
-    }
-    return napi_clear_last_error(env);
+  CHECK_MAYBE_EMPTY_WITH_PREAMBLE(env, maybe, napi_generic_failure);
+  if (result != nullptr) {
+    *result = v8impl::JsValueFromV8LocalValue(maybe.ToLocalChecked());
   }
+  return napi_clear_last_error(env);
 }
 
 napi_status NAPI_CDECL napi_get_global(napi_env env, napi_value* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   *result = v8impl::JsValueFromV8LocalValue(env->context()->Global());
@@ -1928,6 +2162,7 @@ napi_status NAPI_CDECL napi_is_error(napi_env env,
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot
   // throw JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
 
@@ -1943,6 +2178,7 @@ napi_status NAPI_CDECL napi_get_value_double(napi_env env,
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
 
@@ -1960,6 +2196,7 @@ napi_status NAPI_CDECL napi_get_value_int32(napi_env env,
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
 
@@ -1984,6 +2221,7 @@ napi_status NAPI_CDECL napi_get_value_uint32(napi_env env,
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
 
@@ -2008,6 +2246,7 @@ napi_status NAPI_CDECL napi_get_value_int64(napi_env env,
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
 
@@ -2041,6 +2280,7 @@ napi_status NAPI_CDECL napi_get_value_bigint_int64(napi_env env,
                                                    int64_t* result,
                                                    bool* lossless) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
   CHECK_ARG(env, lossless);
@@ -2059,6 +2299,7 @@ napi_status NAPI_CDECL napi_get_value_bigint_uint64(napi_env env,
                                                     uint64_t* result,
                                                     bool* lossless) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
   CHECK_ARG(env, lossless);
@@ -2078,6 +2319,7 @@ napi_status NAPI_CDECL napi_get_value_bigint_words(napi_env env,
                                                    size_t* word_count,
                                                    uint64_t* words) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, word_count);
 
@@ -2108,6 +2350,7 @@ napi_status NAPI_CDECL napi_get_value_bool(napi_env env,
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
 
@@ -2130,6 +2373,7 @@ napi_status NAPI_CDECL napi_get_value_bool(napi_env env,
 napi_status NAPI_CDECL napi_get_value_string_latin1(
     napi_env env, napi_value value, char* buf, size_t bufsize, size_t* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
 
   v8::Local<v8::Value> val = v8impl::V8LocalValueFromJsValue(value);
@@ -2168,6 +2412,7 @@ napi_status NAPI_CDECL napi_get_value_string_latin1(
 napi_status NAPI_CDECL napi_get_value_string_utf8(
     napi_env env, napi_value value, char* buf, size_t bufsize, size_t* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
 
   v8::Local<v8::Value> val = v8impl::V8LocalValueFromJsValue(value);
@@ -2209,6 +2454,7 @@ napi_status NAPI_CDECL napi_get_value_string_utf16(napi_env env,
                                                    size_t bufsize,
                                                    size_t* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
 
   v8::Local<v8::Value> val = v8impl::V8LocalValueFromJsValue(value);
@@ -2395,6 +2641,7 @@ napi_status NAPI_CDECL napi_get_value_external(napi_env env,
                                                napi_value value,
                                                void** result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
 
@@ -2415,13 +2662,16 @@ napi_status NAPI_CDECL napi_create_reference(napi_env env,
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
 
   v8::Local<v8::Value> v8_value = v8impl::V8LocalValueFromJsValue(value);
-  if (!(v8_value->IsObject() || v8_value->IsFunction() ||
-        v8_value->IsSymbol())) {
-    return napi_set_last_error(env, napi_invalid_arg);
+  if (env->module_api_version != NAPI_VERSION_EXPERIMENTAL) {
+    if (!(v8_value->IsObject() || v8_value->IsFunction() ||
+          v8_value->IsSymbol())) {
+      return napi_set_last_error(env, napi_invalid_arg);
+    }
   }
 
   v8impl::Reference* reference = v8impl::Reference::New(
@@ -2437,6 +2687,7 @@ napi_status NAPI_CDECL napi_delete_reference(napi_env env, napi_ref ref) {
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, ref);
 
   delete reinterpret_cast<v8impl::Reference*>(ref);
@@ -2455,6 +2706,7 @@ napi_status NAPI_CDECL napi_reference_ref(napi_env env,
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, ref);
 
   v8impl::Reference* reference = reinterpret_cast<v8impl::Reference*>(ref);
@@ -2477,6 +2729,7 @@ napi_status NAPI_CDECL napi_reference_unref(napi_env env,
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, ref);
 
   v8impl::Reference* reference = reinterpret_cast<v8impl::Reference*>(ref);
@@ -2503,6 +2756,7 @@ napi_status NAPI_CDECL napi_get_reference_value(napi_env env,
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, ref);
   CHECK_ARG(env, result);
 
@@ -2517,6 +2771,7 @@ napi_status NAPI_CDECL napi_open_handle_scope(napi_env env,
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   *result = v8impl::JsHandleScopeFromV8HandleScope(
@@ -2530,6 +2785,7 @@ napi_status NAPI_CDECL napi_close_handle_scope(napi_env env,
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, scope);
   if (env->open_handle_scopes == 0) {
     return napi_handle_scope_mismatch;
@@ -2545,6 +2801,7 @@ napi_status NAPI_CDECL napi_open_escapable_handle_scope(
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   *result = v8impl::JsEscapableHandleScopeFromV8EscapableHandleScope(
@@ -2558,6 +2815,7 @@ napi_status NAPI_CDECL napi_close_escapable_handle_scope(
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, scope);
   if (env->open_handle_scopes == 0) {
     return napi_handle_scope_mismatch;
@@ -2575,6 +2833,7 @@ napi_status NAPI_CDECL napi_escape_handle(napi_env env,
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, scope);
   CHECK_ARG(env, escapee);
   CHECK_ARG(env, result);
@@ -2653,6 +2912,7 @@ napi_status NAPI_CDECL napi_is_exception_pending(napi_env env, bool* result) {
   // NAPI_PREAMBLE is not used here: this function must execute when there is a
   // pending exception.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   *result = !env->last_exception.IsEmpty();
@@ -2664,6 +2924,7 @@ napi_status NAPI_CDECL napi_get_and_clear_last_exception(napi_env env,
   // NAPI_PREAMBLE is not used here: this function must execute when there is a
   // pending exception.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, result);
 
   if (env->last_exception.IsEmpty()) {
@@ -2681,6 +2942,7 @@ napi_status NAPI_CDECL napi_is_arraybuffer(napi_env env,
                                            napi_value value,
                                            bool* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
 
@@ -2733,6 +2995,7 @@ napi_status NAPI_CDECL napi_get_arraybuffer_info(napi_env env,
                                                  void** data,
                                                  size_t* byte_length) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, arraybuffer);
 
   v8::Local<v8::Value> value = v8impl::V8LocalValueFromJsValue(arraybuffer);
@@ -2755,6 +3018,7 @@ napi_status NAPI_CDECL napi_is_typedarray(napi_env env,
                                           napi_value value,
                                           bool* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
 
@@ -2841,6 +3105,7 @@ napi_status NAPI_CDECL napi_get_typedarray_info(napi_env env,
                                                 napi_value* arraybuffer,
                                                 size_t* byte_offset) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, typedarray);
 
   v8::Local<v8::Value> value = v8impl::V8LocalValueFromJsValue(typedarray);
@@ -2931,6 +3196,7 @@ napi_status NAPI_CDECL napi_is_dataview(napi_env env,
                                         napi_value value,
                                         bool* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
 
@@ -2947,6 +3213,7 @@ napi_status NAPI_CDECL napi_get_dataview_info(napi_env env,
                                               napi_value* arraybuffer,
                                               size_t* byte_offset) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, dataview);
 
   v8::Local<v8::Value> value = v8impl::V8LocalValueFromJsValue(dataview);
@@ -2983,7 +3250,7 @@ napi_status NAPI_CDECL napi_get_dataview_info(napi_env env,
 napi_status NAPI_CDECL napi_get_version(napi_env env, uint32_t* result) {
   CHECK_ENV(env);
   CHECK_ARG(env, result);
-  *result = NAPI_VERSION;
+  *result = NODE_API_SUPPORTED_VERSION_MAX;
   return napi_clear_last_error(env);
 }
 
@@ -3022,6 +3289,7 @@ napi_status NAPI_CDECL napi_is_promise(napi_env env,
                                        napi_value value,
                                        bool* is_promise) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, is_promise);
 
@@ -3048,6 +3316,7 @@ napi_status NAPI_CDECL napi_is_date(napi_env env,
                                     napi_value value,
                                     bool* is_date) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, is_date);
 
@@ -3060,6 +3329,7 @@ napi_status NAPI_CDECL napi_get_date_value(napi_env env,
                                            napi_value value,
                                            double* result) {
   NAPI_PREAMBLE(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, value);
   CHECK_ARG(env, result);
 
@@ -3106,6 +3376,7 @@ napi_status NAPI_CDECL napi_add_finalizer(napi_env env,
   // Omit NAPI_PREAMBLE and GET_RETURN_STATUS because V8 calls here cannot throw
   // JS exceptions.
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, js_object);
   CHECK_ARG(env, finalize_cb);
 
@@ -3125,6 +3396,20 @@ napi_status NAPI_CDECL napi_add_finalizer(napi_env env,
   }
   return napi_clear_last_error(env);
 }
+
+#ifdef NAPI_EXPERIMENTAL
+
+napi_status NAPI_CDECL node_api_post_finalizer(napi_env env,
+                                               napi_finalize finalize_cb,
+                                               void* finalize_data,
+                                               void* finalize_hint) {
+  CHECK_ENV(env);
+  env->EnqueueFinalizer(v8impl::TrackedFinalizer::New(
+      env, finalize_cb, finalize_data, finalize_hint));
+  return napi_clear_last_error(env);
+}
+
+#endif
 
 napi_status NAPI_CDECL napi_adjust_external_memory(napi_env env,
                                                    int64_t change_in_bytes,
@@ -3171,6 +3456,7 @@ napi_status NAPI_CDECL napi_get_instance_data(napi_env env, void** data) {
 napi_status NAPI_CDECL napi_detach_arraybuffer(napi_env env,
                                                napi_value arraybuffer) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, arraybuffer);
 
   v8::Local<v8::Value> value = v8impl::V8LocalValueFromJsValue(arraybuffer);
@@ -3190,6 +3476,7 @@ napi_status NAPI_CDECL napi_is_detached_arraybuffer(napi_env env,
                                                     napi_value arraybuffer,
                                                     bool* result) {
   CHECK_ENV(env);
+  env->CheckGCAccess();
   CHECK_ARG(env, arraybuffer);
   CHECK_ARG(env, result);
 

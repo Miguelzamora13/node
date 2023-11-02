@@ -51,6 +51,7 @@ const mockHook = async (t, { hookResponse, ...npmOpts } = {}) => {
 
   const mock = await mockNpm(t, {
     ...npmOpts,
+    command: 'hook',
     mocks: {
       libnpmhook,
       ...npmOpts.mocks,
@@ -60,7 +61,6 @@ const mockHook = async (t, { hookResponse, ...npmOpts } = {}) => {
   return {
     ...mock,
     now,
-    hook: { exec: (args) => mock.npm.exec('hook', args) },
     hookArgs: () => hookArgs,
   }
 }
@@ -243,7 +243,7 @@ t.test('npm hook ls', async t => {
     'received the correct arguments'
   )
   t.equal(outputs[0][0], 'You have 3 hooks configured.', 'prints the correct header')
-  const out = require('../../../lib/utils/ansi-trim')(outputs[1][0])
+  const out = require('strip-ansi')(outputs[1][0])
   t.match(out, /semver.*https:\/\/google.com.*\n.*\n.*never triggered/, 'prints package hook')
   t.match(out, /@npmcli.*https:\/\/google.com.*\n.*\n.*triggered just now/, 'prints scope hook')
   t.match(out, /~npm.*https:\/\/google.com.*\n.*\n.*never triggered/, 'prints owner hook')
@@ -292,7 +292,7 @@ t.test('npm hook ls, single result', async t => {
     'received the correct arguments'
   )
   t.equal(outputs[0][0], 'You have one hook configured.', 'prints the correct header')
-  const out = require('../../../lib/utils/ansi-trim')(outputs[1][0])
+  const out = require('strip-ansi')(outputs[1][0])
   t.match(out, /semver.*https:\/\/google.com.*\n.*\n.*never triggered/, 'prints package hook')
 })
 

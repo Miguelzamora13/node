@@ -286,7 +286,7 @@ coverage-report-js:
 # Runs the C++ tests using the built `cctest` executable.
 cctest: all
 	@out/$(BUILDTYPE)/$@ --gtest_filter=$(GTEST_FILTER)
-	@out/$(BUILDTYPE)/embedtest "require('./test/embedding/test-embedding.js')"
+	$(NODE) ./test/embedding/test-embedding.js
 
 .PHONY: list-gtests
 list-gtests:
@@ -550,7 +550,7 @@ test-ci: | clear-stalled bench-addons-build build-addons build-js-native-api-tes
 	$(PYTHON) tools/test.py $(PARALLEL_ARGS) -p tap --logfile test.tap \
 		--mode=$(BUILDTYPE_LOWER) --flaky-tests=$(FLAKY_TESTS) \
 		$(TEST_CI_ARGS) $(CI_JS_SUITES) $(CI_NATIVE_SUITES) $(CI_DOC)
-	out/Release/embedtest 'require("./test/embedding/test-embedding.js")'
+	$(NODE) ./test/embedding/test-embedding.js
 	$(info Clean up any leftover processes, error if found.)
 	ps awwx | grep Release/node | grep -v grep | cat
 	@PS_OUT=`ps awwx | grep Release/node | grep -v grep | awk '{print $$1}'`; \
@@ -1409,6 +1409,7 @@ LINT_CPP_FILES = $(filter-out $(LINT_CPP_EXCLUDE), $(wildcard \
 	test/fixtures/*.c \
 	test/js-native-api/*/*.cc \
 	test/node-api/*/*.cc \
+	tools/js2c.cc \
 	tools/icu/*.cc \
 	tools/icu/*.h \
 	tools/code_cache/*.cc \
@@ -1421,6 +1422,8 @@ FORMAT_CPP_FILES ?=
 FORMAT_CPP_FILES += $(LINT_CPP_FILES)
 # C source codes.
 FORMAT_CPP_FILES += $(wildcard \
+	benchmark/napi/*/*.c \
+	test/js-native-api/*.h \
 	test/js-native-api/*/*.c \
 	test/js-native-api/*/*.h \
 	test/node-api/*/*.c \
@@ -1489,22 +1492,22 @@ cpplint: lint-cpp
 	$(warning Please use lint-cpp instead of cpplint)
 
 .PHONY: lint-py-build
-# python -m pip install flake8
+# python -m pip install ruff
 # Try with '--system' if it fails without; the system may have set '--user'
 lint-py-build:
-	$(info Pip installing flake8 linter on $(shell $(PYTHON) --version)...)
-	$(PYTHON) -m pip install --upgrade -t tools/pip/site-packages flake8 || \
-		$(PYTHON) -m pip install --upgrade --system -t tools/pip/site-packages flake8
+	$(info Pip installing ruff on $(shell $(PYTHON) --version)...)
+	$(PYTHON) -m pip install --upgrade --target tools/pip/site-packages ruff==0.0.272 || \
+		$(PYTHON) -m pip install --upgrade --system --target tools/pip/site-packages ruff==0.0.272
 
 .PHONY: lint-py
-ifneq ("","$(wildcard tools/pip/site-packages/flake8)")
-# Lints the Python code with flake8.
-# Flag the build if there are Python syntax errors or undefined names
+ifneq ("","$(wildcard tools/pip/site-packages/ruff)")
+# Lint the Python code with ruff.
 lint-py:
-	PYTHONPATH=tools/pip $(PYTHON) -m flake8 --count --show-source --statistics .
+	tools/pip/site-packages/bin/ruff --version
+	tools/pip/site-packages/bin/ruff .
 else
 lint-py:
-	$(warning Python linting with flake8 is not available)
+	$(warning Python linting with ruff is not available)
 	$(warning Run 'make lint-py-build')
 endif
 

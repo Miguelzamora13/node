@@ -34,7 +34,7 @@ jobs:
                   --label 'request-ci' \
                   --json 'number' \
                   -t '{{ range . }}{{ .number }} {{ end }}' \
-                  --limit 100)
+                  --limit 5)
           echo "numbers=$numbers" >> $GITHUB_OUTPUT
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -46,19 +46,19 @@ jobs:
     if: needs.get-prs-for-ci.outputs.numbers != ''
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c  # v3.3.0
+      - uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608  # v4.1.0
         with:
           persist-credentials: false
 
       - name: Install Node.js
-        uses: actions/setup-node@64ed1c7eab4cce3362f8c340dee64e5eaeef8f7c  # v3.6.0
+        uses: actions/setup-node@5e21ff4d9bc1a8cf6de233a3057d20ec6b3fb69d  # v3.8.1
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install node-core-utils
-        run: npm install -g node-core-utils
+      - name: Install @node-core/utils
+        run: npm install -g @node-core/utils
 
-      - name: Setup node-core-utils
+      - name: Setup @node-core/utils
         run: |
           ncu-config set username ${{ secrets.JENKINS_USER }}
           ncu-config set token "${{ secrets.GH_USER_TOKEN }}"

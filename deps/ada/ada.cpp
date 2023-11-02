@@ -1,4 +1,4 @@
-/* auto-generated on 2023-03-30 17:00:48 -0400. Do not edit! */
+/* auto-generated on 2023-10-22 19:50:50 -0400. Do not edit! */
 /* begin file src/ada.cpp */
 #include "ada.h"
 /* begin file src/checkers.cpp */
@@ -116,12 +116,14 @@ ada_really_inline constexpr bool verify_dns_length(
 
 ADA_PUSH_DISABLE_ALL_WARNINGS
 /* begin file src/ada_idna.cpp */
-/* auto-generated on 2023-03-28 11:03:13 -0400. Do not edit! */
+/* auto-generated on 2023-09-19 15:58:51 -0400. Do not edit! */
 /* begin file src/idna.cpp */
 /* begin file src/unicode_transcoding.cpp */
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
+
 namespace ada::idna {
 
 size_t utf8_to_utf32(const char* buf, size_t len, char32_t* utf32_output) {
@@ -225,38 +227,22 @@ size_t utf8_length_from_utf32(const char32_t* buf, size_t len) {
   // We are not BOM aware.
   const uint32_t* p = reinterpret_cast<const uint32_t*>(buf);
   size_t counter{0};
-  for (size_t i = 0; i < len; i++) {
-    /** ASCII **/
-    if (p[i] <= 0x7F) {
-      counter++;
-    }
-    /** two-byte **/
-    else if (p[i] <= 0x7FF) {
-      counter += 2;
-    }
-    /** three-byte **/
-    else if (p[i] <= 0xFFFF) {
-      counter += 3;
-    }
-    /** four-bytes **/
-    else {
-      counter += 4;
-    }
+  for (size_t i = 0; i != len; ++i) {
+    ++counter;                                      // ASCII
+    counter += static_cast<size_t>(p[i] > 0x7F);    // two-byte
+    counter += static_cast<size_t>(p[i] > 0x7FF);   // three-byte
+    counter += static_cast<size_t>(p[i] > 0xFFFF);  // four-bytes
   }
   return counter;
 }
 
 size_t utf32_length_from_utf8(const char* buf, size_t len) {
   const int8_t* p = reinterpret_cast<const int8_t*>(buf);
-  size_t counter{0};
-  for (size_t i = 0; i < len; i++) {
+  return std::count_if(p, std::next(p, len), [](int8_t c) {
     // -65 is 0b10111111, anything larger in two-complement's
     // should start a new code point.
-    if (p[i] > -65) {
-      counter++;
-    }
-  }
-  return counter;
+    return c > -65;
+  });
 }
 
 size_t utf32_to_utf8(const char32_t* buf, size_t len, char* utf8_output) {
@@ -2750,10 +2736,12 @@ uint32_t find_range_index(uint32_t key) {
 }
 
 bool ascii_has_upper_case(char* input, size_t length) {
-  auto broadcast = [](uint8_t v) -> uint64_t { return 0x101010101010101 * v; };
+  auto broadcast = [](uint8_t v) -> uint64_t {
+    return 0x101010101010101ull * v;
+  };
   uint64_t broadcast_80 = broadcast(0x80);
   uint64_t broadcast_Ap = broadcast(128 - 'A');
-  uint64_t broadcast_Zp = broadcast(128 - 'Z');
+  uint64_t broadcast_Zp = broadcast(128 - 'Z' - 1);
   size_t i = 0;
 
   uint64_t runner{0};
@@ -2772,10 +2760,12 @@ bool ascii_has_upper_case(char* input, size_t length) {
 }
 
 void ascii_map(char* input, size_t length) {
-  auto broadcast = [](uint8_t v) -> uint64_t { return 0x101010101010101 * v; };
+  auto broadcast = [](uint8_t v) -> uint64_t {
+    return 0x101010101010101ull * v;
+  };
   uint64_t broadcast_80 = broadcast(0x80);
   uint64_t broadcast_Ap = broadcast(128 - 'A');
-  uint64_t broadcast_Zp = broadcast(128 - 'Z');
+  uint64_t broadcast_Zp = broadcast(128 - 'Z' - 1);
   size_t i = 0;
 
   for (; i + 7 < length; i += 8) {
@@ -2824,8 +2814,6 @@ std::u32string map(std::u32string_view input) {
         break;
       case 2:
         return error;  // disallowed
-        break;
-
       // case 3 :
       default:
         // We have a mapping
@@ -2843,2267 +2831,26 @@ std::u32string map(std::u32string_view input) {
 }  // namespace ada::idna
 /* end file src/mapping.cpp */
 /* begin file src/normalization.cpp */
+/* begin file src/normalization_tables.cpp */
+// IDNA  15.0.0
 
-/* begin file src/unilib/uninorms.h */
-// This file is part of UniLib <http://github.com/ufal/unilib/>.
-//
-// Copyright 2014 Institute of Formal and Applied Linguistics, Faculty of
-// Mathematics and Physics, Charles University in Prague, Czech Republic.
-//
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
-//
-// UniLib version: 3.3.1-dev
-// Unicode version: 15.0.0
-
-
+// clang-format off
+#ifndef ADA_IDNA_NORMALIZATION_TABLES_H
+#define ADA_IDNA_NORMALIZATION_TABLES_H
 #include <cstdint>
-#include <string>
 
-namespace ufal {
-namespace unilib {
+/**
+ * Unicode Standard Annex #15
+ *
+ * UNICODE NORMALIZATION FORMS
+ * https://www.unicode.org/reports/tr15/
+ *
+ * See https://github.com/uni-algo/uni-algo/blob/c612968c5ed3ace39bde4c894c24286c5f2c7fe2/include/uni_algo/impl/data/data_norm.h for reference.
+ */
 
-class uninorms {
- public:
-  static void nfc(std::u32string& str);
-  static void nfd(std::u32string& str);
-  static void nfkc(std::u32string& str);
-  static void nfkd(std::u32string& str);
+namespace ada::idna {
 
- private:
-  static void compose(std::u32string& str);
-  static void decompose(std::u32string& str, bool kanonical);
-
-  static const char32_t CHARS = 0x110000;
-
-  struct Hangul {
-    // Hangul decomposition and composition
-    static const char32_t SBase = 0xAC00, LBase = 0x1100, VBase = 0x1161,
-                          TBase = 0x11A7;
-    static const char32_t LCount = 19, VCount = 21, TCount = 28,
-                          NCount = VCount * TCount, SCount = LCount * NCount;
-  };
-
-  static const uint8_t ccc_index[CHARS >> 8];
-  static const uint8_t ccc_block[][256];
-
-  static const uint8_t composition_index[CHARS >> 8];
-  static const uint16_t composition_block[][257];
-  static const char32_t composition_data[];
-
-  static const uint8_t decomposition_index[CHARS >> 8];
-  static const uint16_t decomposition_block[][257];
-  static const char32_t decomposition_data[];
-};
-
-}  // namespace unilib
-}  // namespace ufal
-/* end file src/unilib/uninorms.h */
-/* begin file src/unilib/uninorms.cpp */
-// This file is part of UniLib <http://github.com/ufal/unilib/>.
-//
-// Copyright 2014 Institute of Formal and Applied Linguistics, Faculty of
-// Mathematics and Physics, Charles University in Prague, Czech Republic.
-//
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
-//
-// UniLib version: 3.3.1-dev
-// Unicode version: 15.0.0
-
-
-namespace ufal {
-namespace unilib {
-
-void uninorms::nfc(std::u32string& str) {
-  decompose(str, false);
-  compose(str);
-}
-
-void uninorms::nfd(std::u32string& str) { decompose(str, false); }
-
-void uninorms::nfkc(std::u32string& str) {
-  decompose(str, true);
-  compose(str);
-}
-
-void uninorms::nfkd(std::u32string& str) { decompose(str, true); }
-
-void uninorms::compose(std::u32string& str) {
-  size_t old, com;
-  for (old = 0, com = 0; old < str.size(); old++, com++) {
-    str[com] = str[old];
-    if (str[old] >= Hangul::LBase &&
-        str[old] < Hangul::LBase + Hangul::LCount) {
-      // Check Hangul composition L + V [+ T].
-      if (old + 1 < str.size() && str[old + 1] >= Hangul::VBase &&
-          str[old + 1] < Hangul::VBase + Hangul::VCount) {
-        str[com] =
-            Hangul::SBase + ((str[old] - Hangul::LBase) * Hangul::VCount +
-                             str[old + 1] - Hangul::VBase) *
-                                Hangul::TCount;
-        old++;
-        if (old + 1 < str.size() && str[old + 1] > Hangul::TBase &&
-            str[old + 1] < Hangul::TBase + Hangul::TCount)
-          str[com] += str[++old] - Hangul::TBase;
-      }
-    } else if (str[old] >= Hangul::SBase &&
-               str[old] < Hangul::SBase + Hangul::SCount) {
-      // Check Hangul composition LV + T
-      if ((str[old] - Hangul::SBase) % Hangul::TCount && old + 1 < str.size() &&
-          str[old + 1] > Hangul::TBase &&
-          str[old + 1] < Hangul::TBase + Hangul::TCount)
-        str[com] += str[++old] - Hangul::TBase;
-    } else if (str[old] < CHARS) {
-      // Check composition_data
-      auto composition =
-          &composition_block[composition_index[str[old] >> 8]][str[old] & 0xFF];
-      auto starter = com;
-      for (int last_ccc = -1; old + 1 < str.size(); old++) {
-        int ccc =
-            str[old + 1] < CHARS
-                ? ccc_block[ccc_index[str[old + 1] >> 8]][str[old + 1] & 0xFF]
-                : 0;
-        if (composition[1] - composition[0] && last_ccc < ccc) {
-          // Try finding a composition.
-          auto l = composition[0], r = composition[1];
-          while (l + 2 < r) {
-            auto m = l + (((r - l) >> 1) & ~1);
-            if (composition_data[m] <= str[old + 1]) l = m;
-            if (composition_data[m] >= str[old + 1]) r = m;
-          }
-          if (composition_data[l] == str[old + 1]) {
-            // Found a composition.
-            str[starter] = composition_data[l + 1];
-            composition =
-                &composition_block[composition_index[composition_data[l + 1] >>
-                                                     8]]
-                                  [composition_data[l + 1] & 0xFF];
-            continue;
-          }
-        }
-
-        if (!ccc) break;
-        last_ccc = ccc;
-        str[++com] = str[old + 1];
-      }
-    }
-  }
-
-  if (com < old) str.resize(com);
-}
-
-void uninorms::decompose(std::u32string& str, bool kompatibility) {
-  // Count how much additional space do we need.
-  bool any_decomposition = false;
-  size_t additional = 0;
-  for (auto&& chr : str) {
-    int decomposition_len = 0;
-
-    if (chr >= Hangul::SBase && chr < Hangul::SBase + Hangul::SCount) {
-      // Hangul decomposition.
-      decomposition_len = 2 + ((chr - Hangul::SBase) % Hangul::TCount ? 1 : 0);
-    } else if (chr < CHARS) {
-      // Check decomposition_data.
-      auto decomposition =
-          &decomposition_block[decomposition_index[chr >> 8]][chr & 0xFF];
-      decomposition_len = (decomposition[1] >> 2) - (decomposition[0] >> 2);
-      if (decomposition_len && !kompatibility && (decomposition[0] & 1))
-        decomposition_len = 0;
-      if (decomposition_len && kompatibility && (decomposition[0] & 2))
-        // Further kompatibility decomposition.
-        for (auto i = decomposition[0] >> 2; i < decomposition[1] >> 2; i++) {
-          auto further_decomposition =
-              &decomposition_block[decomposition_index[decomposition_data[i] >>
-                                                       8]]
-                                  [decomposition_data[i] & 0xFF];
-          if (further_decomposition[0] & 1)
-            decomposition_len += (further_decomposition[1] >> 2) -
-                                 (further_decomposition[0] >> 2) - 1;
-        }
-    }
-    // Do we decompose current character?
-    if (!decomposition_len) continue;
-    any_decomposition = true;
-    additional += decomposition_len - 1;
-  }
-
-  // If needed, allocate enough space and perform the decomposition.
-  if (any_decomposition) {
-    str.resize(str.size() + additional);
-    for (size_t dec = str.size(), old = dec - additional; old--;)
-      if (str[old] >= Hangul::SBase &&
-          str[old] < Hangul::SBase + Hangul::SCount) {
-        // Hangul decomposition.
-        char32_t s_index = str[old] - Hangul::SBase;
-        if (s_index % Hangul::TCount)
-          str[--dec] = Hangul::TBase + s_index % Hangul::TCount;
-        str[--dec] =
-            Hangul::VBase + (s_index % Hangul::NCount) / Hangul::TCount;
-        str[--dec] = Hangul::LBase + s_index / Hangul::NCount;
-      } else if (str[old] < CHARS) {
-        // Check decomposition_data.
-        auto decomposition =
-            &decomposition_block[decomposition_index[str[old] >> 8]]
-                                [str[old] & 0xFF];
-        int decomposition_len =
-            (decomposition[1] >> 2) - (decomposition[0] >> 2);
-        if (decomposition_len && !kompatibility && (decomposition[0] & 1))
-          decomposition_len = 0;
-        if (decomposition_len && kompatibility && (decomposition[0] & 2)) {
-          // Further kompatibility decomposition.
-          while (decomposition_len--) {
-            auto chr =
-                decomposition_data[(decomposition[0] >> 2) + decomposition_len];
-            auto further_decomposition =
-                &decomposition_block[decomposition_index[chr >> 8]][chr & 0xFF];
-            if (further_decomposition[0] & 1) {
-              for (int further_decomposition_len =
-                       (further_decomposition[1] >> 2) -
-                       (further_decomposition[0] >> 2);
-                   further_decomposition_len--;)
-                str[--dec] =
-                    decomposition_data[(further_decomposition[0] >> 2) +
-                                       further_decomposition_len];
-            } else {
-              str[--dec] = chr;
-            }
-          }
-        } else if (decomposition_len) {
-          // Non-recursive decomposition.
-          while (decomposition_len--)
-            str[--dec] =
-                decomposition_data[(decomposition[0] >> 2) + decomposition_len];
-        } else {
-          // No decomposition.
-          str[--dec] = str[old];
-        }
-      } else {
-        // Non-Unicode character.
-        str[--dec] = str[old];
-      }
-  }
-
-  // Sort combining marks.
-  for (size_t i = 1; i < str.size(); i++) {
-    unsigned ccc =
-        str[i] < CHARS ? ccc_block[ccc_index[str[i] >> 8]][str[i] & 0xFF] : 0;
-    if (!ccc) continue;
-
-    auto chr = str[i];
-    size_t j;
-    for (j = i;
-         j && (str[j - 1] < CHARS
-                   ? ccc_block[ccc_index[str[j - 1] >> 8]][str[j - 1] & 0xFF]
-                   : 0) > ccc;
-         j--)
-      str[j] = str[j - 1];
-    str[j] = chr;
-  }
-}
-
-// Data fields
-const char32_t uninorms::CHARS;
-
-const char32_t uninorms::Hangul::SBase;
-const char32_t uninorms::Hangul::LBase;
-const char32_t uninorms::Hangul::VBase;
-const char32_t uninorms::Hangul::TBase;
-const char32_t uninorms::Hangul::LCount;
-const char32_t uninorms::Hangul::VCount;
-const char32_t uninorms::Hangul::TCount;
-const char32_t uninorms::Hangul::NCount;
-const char32_t uninorms::Hangul::SCount;
-
-const uint8_t uninorms::ccc_index[uninorms::CHARS >> 8] = {
-    0,  0,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 0,  0,
-    15, 0,  0,  0,  16, 17, 18, 19, 20, 21, 22, 0,  0,  23, 0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  24, 25, 0,  0,  26, 0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  27, 0,  28, 29, 30,
-    31, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  32, 0,  0,  33, 0,  0,  34, 35, 36, 0,  0,  0,  0,  0,  0,
-    37, 0,  0,  38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 0,  52,
-    53, 0,  54, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  55, 56, 0,  0,  0,  57, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  58, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  59, 60, 0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  61, 56, 62, 0,  63, 0,  0,  0,  64, 65, 0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0};
-const uint8_t uninorms::ccc_block[][256] = {
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
-     230, 230, 230, 230, 230, 230, 232, 220, 220, 220, 220, 232, 216, 220, 220,
-     220, 220, 220, 202, 202, 220, 220, 220, 220, 202, 202, 220, 220, 220, 220,
-     220, 220, 220, 220, 220, 220, 220, 1,   1,   1,   1,   1,   220, 220, 220,
-     220, 230, 230, 230, 230, 230, 230, 230, 230, 240, 230, 220, 220, 220, 230,
-     230, 230, 220, 220, 0,   230, 230, 230, 220, 220, 220, 220, 230, 232, 220,
-     220, 230, 233, 234, 234, 233, 234, 234, 233, 230, 230, 230, 230, 230, 230,
-     230, 230, 230, 230, 230, 230, 230, 0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0},
-    {0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 230,
-     230, 230, 230, 230, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   220, 230, 230, 230, 230,
-     220, 230, 230, 230, 222, 220, 230, 230, 230, 230, 230, 230, 220, 220, 220,
-     220, 220, 220, 230, 230, 220, 230, 230, 222, 228, 230, 10,  11,  12,  13,
-     14,  15,  16,  17,  18,  19,  19,  20,  21,  22,  0,   23,  0,   24,  25,
-     0,   230, 220, 0,   18,  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0},
-    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   230, 230, 230, 230, 230, 230, 230, 230, 30,  31,  32,  0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     27,  28,  29,  30,  31,  32,  33,  34,  230, 230, 220, 220, 230, 230, 230,
-     230, 230, 220, 230, 230, 220, 0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   35,  0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   230, 230, 230, 230, 230, 230, 230, 0,   0,   230, 230,
-     230, 230, 220, 230, 0,   0,   230, 230, 0,   220, 230, 230, 220, 0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0},
-    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   36,  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   230, 220, 230, 230, 220, 230, 230, 220, 220, 220, 230, 220,
-     220, 230, 220, 230, 230, 230, 220, 230, 220, 230, 220, 230, 220, 230, 230,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230, 230, 230, 230, 230,
-     230, 230, 220, 230, 0,   0,   0,   0,   0,   0,   0,   0,   0,   220, 0,
-     0},
-    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   230, 230, 230, 230, 0,   230, 230, 230,
-     230, 230, 230, 230, 230, 230, 0,   230, 230, 230, 0,   230, 230, 230, 230,
-     230, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   220,
-     220, 220, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   230, 220, 220, 220, 230, 230, 230, 230, 0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   230, 230, 230, 230, 230, 220, 220, 220,
-     220, 220, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
-     230, 0,   220, 230, 230, 220, 230, 230, 220, 230, 230, 230, 220, 220, 220,
-     27,  28,  29,  230, 230, 230, 220, 230, 230, 220, 220, 230, 230, 230, 230,
-     230},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   7,   0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0,   0, 0, 230, 220, 230, 230, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7,   0, 0, 0,   0,   0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 230, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 84, 91, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 7, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   103, 103, 9,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     107, 107, 107, 107, 0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   118, 118, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   122, 122, 122, 122, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0},
-    {0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
-     0,   0, 0,   0,   0,   0,   0, 0, 0,   220, 220, 0,   0,   0, 0,
-     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
-     0,   0, 0,   0,   0,   0,   0, 0, 220, 0,   220, 0,   216, 0, 0,
-     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
-     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
-     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
-     0,   0, 0,   0,   0,   0,   0, 0, 129, 130, 0,   132, 0,   0, 0,
-     0,   0, 130, 130, 130, 130, 0, 0, 130, 0,   230, 230, 9,   0, 230,
-     230, 0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
-     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
-     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
-     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
-     0,   0, 0,   220, 0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
-     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
-     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
-     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
-     0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 7, 0, 9, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 220, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 230, 230, 230, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 9, 0, 0,
-     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 9, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 230, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 228, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 222, 230, 220, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   230, 220, 0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   9,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230, 230, 230,
-     230, 230, 230, 230, 230, 0,   0,   220, 0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230, 230, 230, 230,
-     230, 220, 220, 220, 220, 220, 220, 230, 230, 220, 0,   220, 220, 230, 230,
-     220, 220, 230, 230, 230, 230, 230, 220, 230, 230, 230, 230, 0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0},
-    {0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   7,   0,   0,   0,   0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 230, 220, 230, 230, 230, 230, 230,
-     230, 230, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   9,
-     9,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
-     0,   0,   7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   9,   9,   0,   0,   0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0},
-    {0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   7,   0,   0,   0,   0,
-     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230, 230,
-     230, 0, 1, 220, 220, 220, 220, 220, 230, 230, 220, 220, 220, 220, 230,
-     0,   1, 1, 1,   1,   1,   1,   1,   0,   0,   0,   0,   220, 0,   0,
-     0,   0, 0, 0,   230, 0,   0,   0,   230, 230, 0,   0,   0,   0,   0,
-     0},
-    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230, 230, 220,
-     230, 230, 230, 230, 230, 230, 230, 220, 230, 230, 234, 214, 220, 202, 230,
-     230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
-     230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
-     230, 230, 230, 230, 230, 230, 232, 228, 228, 220, 218, 230, 233, 220, 230,
-     220},
-    {0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
-     230, 230, 1, 1, 230, 230, 230, 230, 1,   1,   1, 230, 230, 0,   0,   0,
-     0,   230, 0, 0, 0,   1,   1,   230, 220, 230, 1, 1,   220, 220, 220, 220,
-     230, 0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 230, 230, 230,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   9,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230,
-     230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
-     230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
-     230},
-    {0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 218, 228, 232, 222, 224, 224, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 8, 8, 0, 0, 0, 0, 0,
-     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0},
-    {0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230,
-     0,   0,   0, 0, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230, 230,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     230, 230, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0},
-    {0,   0,   0,   0,   0,   0,   9,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   9,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   9,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230,
-     230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
-     230, 230, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0},
-    {0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 220,
-     220, 220, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
-     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
-     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
-     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
-     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
-     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
-     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
-     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
-     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
-     0,   0,   0, 0,   0, 230, 0, 230, 230, 220, 0, 0, 230, 230, 0, 0, 0, 0, 0,
-     230, 230, 0, 230, 0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
-     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
-     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 9,
-     0,   0,   0, 0,   0, 0,   0, 0,   0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 26, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   230, 230, 230, 230, 230, 230, 230, 220, 220, 220, 220, 220, 220,
-     220, 230, 230, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 220, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 220, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 230, 230, 230, 230, 230, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 220, 0, 230, 0,   0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   230, 1, 220, 0,
-     0, 0, 0, 9, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 230, 220, 0, 0, 0,   0, 0,   0,   0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 230, 230, 230, 230, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 230, 230, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 220, 220, 220},
-    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 220, 220,
-     230, 230, 230, 220, 230, 220, 220, 220, 220, 0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0,   0,   0,   0,   230, 220, 230, 220, 0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0,   0,   0,   0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 7, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {230, 230, 230, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 9, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 9, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 9, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
-     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
-     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
-     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   7,   7,   0, 0, 0,
-     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   9, 0, 0,
-     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
-     0,   0,   0,   0,   0,   0, 230, 230, 230, 230, 230, 230, 230, 0, 0, 0,
-     230, 230, 230, 230, 230, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
-     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
-     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
-     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
-     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
-     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
-     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
-     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
-     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 7,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 230, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0, 0, 9, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9,
-     7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 7, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 9, 0, 0, 0, 0, 7, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 9, 9, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 9, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 230, 230, 230, 230, 230, 230, 230, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     6, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0, 0, 216, 216, 1,   1,   1,   0,   0,   0,   226, 216, 216,
-     216, 216, 216, 0, 0, 0,   0,   0,   0,   0,   0,   220, 220, 220, 220, 220,
-     220, 220, 220, 0, 0, 230, 230, 230, 230, 230, 220, 220, 0,   0,   0,   0,
-     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   230, 230, 230, 230, 0,   0,
-     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0},
-    {0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     230, 230, 230, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {230, 230, 230, 230, 230, 230, 230, 0,   230, 230, 230, 230, 230, 230, 230,
-     230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 0,   0,   230, 230, 230,
-     230, 230, 230, 230, 0,   230, 230, 0,   230, 230, 230, 230, 230, 0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   230, 0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-     0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   230, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 230, 230, 230, 230, 0,   0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 232, 232, 220, 230, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 220, 220, 220, 220, 220, 220, 220, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 230, 230, 230, 230, 230, 230, 7, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0}};
-
-const uint8_t uninorms::composition_index[uninorms::CHARS >> 8] = {
-    0, 1, 2, 3, 4,  5,  6, 5, 5,  7,  5, 8,  9,  10, 5, 5, 11, 5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  12, 5, 5, 13, 14, 5, 15, 16, 5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 17, 5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 18, 19, 5, 20, 21, 22, 5, 5, 5,  23, 5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
-    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5};
-const uint16_t uninorms::composition_block[][257] = {
-    {1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,
-     1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,
-     1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,
-     1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,
-     1,   3,   5,   7,   7,   7,   39,  45,  55,  67,  101, 103, 117, 131, 161,
-     163, 173, 185, 191, 209, 241, 245, 245, 261, 275, 289, 327, 331, 343, 347,
-     365, 377, 377, 377, 377, 377, 377, 377, 409, 415, 425, 437, 471, 473, 487,
-     503, 531, 535, 545, 557, 563, 581, 613, 617, 617, 633, 647, 663, 701, 705,
-     719, 723, 743, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755,
-     755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755,
-     755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755,
-     755, 755, 755, 755, 761, 761, 761, 761, 761, 761, 761, 761, 761, 761, 761,
-     761, 761, 761, 761, 761, 761, 761, 761, 761, 761, 761, 761, 761, 761, 761,
-     769, 769, 771, 773, 777, 779, 779, 779, 787, 787, 787, 787, 787, 789, 789,
-     789, 789, 789, 797, 803, 805, 805, 807, 807, 807, 807, 815, 815, 815, 815,
-     815, 815, 823, 823, 825, 827, 831, 833, 833, 833, 841, 841, 841, 841, 841,
-     843, 843, 843, 843, 843, 851, 857, 859, 859, 861, 861, 861, 861, 869, 869,
-     869, 869},
-    {869, 869, 869, 877, 885, 885, 885, 885, 885, 885, 885, 885, 885, 885, 885,
-     885, 885, 885, 885, 889, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893,
-     893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893,
-     893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893,
-     893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893,
-     893, 893, 897, 901, 901, 901, 901, 901, 901, 901, 901, 901, 901, 901, 901,
-     901, 903, 905, 905, 905, 905, 905, 907, 909, 909, 909, 909, 909, 909, 909,
-     911, 913, 915, 917, 917, 917, 917, 917, 917, 917, 917, 917, 917, 917, 917,
-     917, 917, 917, 917, 917, 917, 917, 917, 919, 919, 919, 919, 919, 919, 919,
-     919, 919, 919, 919, 919, 919, 919, 919, 919, 919, 919, 919, 919, 919, 919,
-     919, 919, 919, 919, 919, 919, 919, 919, 919, 919, 919, 929, 939, 939, 939,
-     939, 939, 939, 939, 939, 939, 939, 939, 939, 939, 939, 949, 959, 959, 959,
-     959, 959, 959, 959, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961,
-     961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961,
-     961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961,
-     961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 963, 965, 965, 965, 965,
-     965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965,
-     965, 965},
-    {965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965,
-     965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965,
-     965, 965, 965, 965, 965, 965, 965, 965, 965, 967, 969, 971, 973, 973, 973,
-     973, 973, 975, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977,
-     977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977,
-     977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977,
-     977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977,
-     977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977,
-     977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977,
-     977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 979, 979, 979,
-     979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979,
-     979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979,
-     979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979,
-     979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979,
-     979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979,
-     979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979,
-     979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979,
-     979, 979},
-    {979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
-     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
-     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
-     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
-     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
-     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
-     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
-     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
-     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
-     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
-     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
-     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
-     979,  979,  993,  993,  993,  993,  1001, 1001, 1011, 1011, 1025, 1025,
-     1025, 1025, 1025, 1025, 1033, 1033, 1035, 1035, 1035, 1035, 1047, 1047,
-     1047, 1047, 1057, 1057, 1057, 1059, 1059, 1061, 1061, 1061, 1077, 1077,
-     1077, 1077, 1085, 1085, 1097, 1097, 1113, 1113, 1113, 1113, 1113, 1113,
-     1121, 1121, 1125, 1125, 1125, 1125, 1141, 1141, 1141, 1141, 1153, 1159,
-     1165, 1165, 1165, 1167, 1167, 1167, 1167, 1171, 1171, 1171, 1171, 1171,
-     1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171,
-     1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171,
-     1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171,
-     1171, 1171, 1171, 1171, 1171},
-    {1171, 1171, 1171, 1171, 1171, 1171, 1171, 1173, 1173, 1173, 1173, 1173,
-     1173, 1173, 1173, 1173, 1173, 1177, 1177, 1177, 1179, 1179, 1185, 1189,
-     1191, 1199, 1199, 1201, 1201, 1201, 1201, 1203, 1203, 1203, 1203, 1203,
-     1211, 1211, 1211, 1211, 1213, 1213, 1213, 1213, 1215, 1215, 1217, 1217,
-     1217, 1221, 1221, 1221, 1223, 1223, 1229, 1233, 1235, 1243, 1243, 1245,
-     1245, 1245, 1245, 1247, 1247, 1247, 1247, 1247, 1255, 1255, 1255, 1255,
-     1257, 1257, 1257, 1257, 1259, 1259, 1261, 1261, 1261, 1261, 1261, 1261,
-     1261, 1261, 1261, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263,
-     1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263,
-     1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1265, 1267, 1267,
-     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
-     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
-     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
-     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
-     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
-     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
-     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
-     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
-     1267, 1269, 1271, 1271, 1271, 1271, 1271, 1271, 1271, 1271, 1271, 1271,
-     1271, 1271, 1271, 1271, 1271, 1273, 1275, 1275, 1275, 1275, 1275, 1275,
-     1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275,
-     1275, 1275, 1275, 1275, 1275},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275,
-     1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275,
-     1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275,
-     1275, 1275, 1275, 1275, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281,
-     1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281,
-     1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281,
-     1281, 1283, 1283, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
-     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
-     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
-     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
-     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
-     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
-     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
-     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
-     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
-     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
-     1285, 1285, 1287, 1287, 1287, 1287, 1287, 1287, 1287, 1287, 1287, 1287,
-     1287, 1287, 1287, 1287, 1287, 1287, 1287, 1289, 1289, 1289, 1291, 1291,
-     1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291,
-     1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291,
-     1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291,
-     1291, 1291, 1291, 1291, 1291},
-    {1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291,
-     1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291,
-     1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291,
-     1291, 1291, 1291, 1291, 1291, 1293, 1293, 1293, 1293, 1293, 1293, 1293,
-     1293, 1295, 1295, 1295, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
-     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
-     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
-     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
-     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
-     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
-     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
-     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
-     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
-     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
-     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
-     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
-     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1301, 1301, 1301, 1301,
-     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
-     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
-     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
-     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
-     1301, 1301, 1301, 1301, 1301},
-    {1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
-     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
-     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
-     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
-     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
-     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
-     1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307,
-     1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307,
-     1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307,
-     1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307,
-     1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307,
-     1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307,
-     1307, 1307, 1307, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309,
-     1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309,
-     1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309,
-     1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309,
-     1309, 1309, 1309, 1309, 1309, 1309, 1309, 1313, 1315, 1315, 1315, 1315,
-     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
-     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
-     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
-     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
-     1315, 1315, 1315, 1315, 1315},
-    {1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
-     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
-     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
-     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
-     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
-     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1317,
-     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
-     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
-     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
-     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
-     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
-     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
-     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
-     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
-     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
-     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
-     1319, 1319, 1319, 1319, 1319, 1319, 1319, 1325, 1325, 1325, 1325, 1327,
-     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
-     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
-     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
-     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
-     1327, 1327, 1327, 1327, 1327},
-    {1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
-     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
-     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
-     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
-     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
-     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1331,
-     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
-     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
-     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
-     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
-     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
-     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
-     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
-     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
-     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
-     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
-     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
-     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
-     1333, 1333, 1339, 1339, 1339, 1341, 1341, 1341, 1341, 1341, 1341, 1341,
-     1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341,
-     1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341,
-     1341, 1341, 1341, 1341, 1341},
-    {1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341,
-     1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341,
-     1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341,
-     1341, 1341, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
-     1343, 1343, 1343, 1343, 1343},
-    {1343, 1343, 1343, 1343, 1343, 1343, 1345, 1345, 1347, 1347, 1349, 1349,
-     1351, 1351, 1353, 1353, 1353, 1353, 1355, 1355, 1355, 1355, 1355, 1355,
-     1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355,
-     1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355,
-     1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1357,
-     1357, 1359, 1359, 1361, 1363, 1363, 1363, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365},
-    {1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
-     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1367, 1369, 1369, 1369, 1369,
-     1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369,
-     1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369,
-     1369, 1369, 1369, 1369, 1369, 1369, 1369, 1371, 1373, 1373, 1373, 1373,
-     1373, 1373, 1373, 1375, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377,
-     1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377,
-     1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377,
-     1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377,
-     1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377,
-     1377, 1377, 1377, 1377, 1377, 1381, 1385, 1385, 1385, 1385, 1385, 1385,
-     1385, 1385, 1385, 1385, 1385, 1385, 1385, 1385, 1385, 1385, 1385, 1385,
-     1385, 1385, 1385, 1385, 1385, 1387, 1389, 1389, 1389, 1389, 1389, 1389,
-     1389, 1389, 1389, 1389, 1389, 1389, 1389, 1389, 1389, 1389, 1389, 1389,
-     1389, 1391, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393,
-     1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393,
-     1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393,
-     1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393,
-     1393, 1393, 1393, 1393, 1393},
-    {1393, 1401, 1409, 1411, 1413, 1415, 1417, 1419, 1421, 1429, 1437, 1439,
-     1441, 1443, 1445, 1447, 1449, 1453, 1457, 1457, 1457, 1457, 1457, 1457,
-     1457, 1461, 1465, 1465, 1465, 1465, 1465, 1465, 1465, 1473, 1481, 1483,
-     1485, 1487, 1489, 1491, 1493, 1501, 1509, 1511, 1513, 1515, 1517, 1519,
-     1521, 1527, 1533, 1533, 1533, 1533, 1533, 1533, 1533, 1539, 1545, 1545,
-     1545, 1545, 1545, 1545, 1545, 1549, 1553, 1553, 1553, 1553, 1553, 1553,
-     1553, 1557, 1561, 1561, 1561, 1561, 1561, 1561, 1561, 1567, 1573, 1573,
-     1573, 1573, 1573, 1573, 1573, 1573, 1579, 1579, 1579, 1579, 1579, 1579,
-     1579, 1587, 1595, 1597, 1599, 1601, 1603, 1605, 1607, 1615, 1623, 1625,
-     1627, 1629, 1631, 1633, 1635, 1637, 1637, 1637, 1637, 1639, 1639, 1639,
-     1639, 1639, 1639, 1639, 1639, 1641, 1641, 1641, 1641, 1641, 1641, 1641,
-     1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641,
-     1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641,
-     1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641,
-     1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641,
-     1641, 1641, 1641, 1643, 1643, 1643, 1643, 1643, 1643, 1643, 1643, 1643,
-     1649, 1649, 1649, 1649, 1649, 1649, 1649, 1651, 1651, 1651, 1651, 1651,
-     1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651,
-     1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651,
-     1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651,
-     1651, 1651, 1651, 1651, 1651, 1651, 1651, 1653, 1653, 1653, 1653, 1653,
-     1653, 1653, 1653, 1659, 1659},
-    {1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
-     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
-     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
-     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
-     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
-     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
-     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
-     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
-     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
-     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
-     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
-     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
-     1659, 1661, 1661, 1663, 1663, 1665, 1665, 1665, 1665, 1665, 1665, 1665,
-     1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665,
-     1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665,
-     1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665,
-     1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665,
-     1665, 1665, 1665, 1665, 1665, 1667, 1667, 1669, 1669, 1671, 1671, 1671,
-     1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671,
-     1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671,
-     1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671,
-     1671, 1671, 1671, 1671, 1671},
-    {1671, 1671, 1671, 1671, 1673, 1673, 1673, 1673, 1673, 1675, 1675, 1675,
-     1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677,
-     1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677,
-     1679, 1679, 1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681,
-     1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681,
-     1681, 1683, 1683, 1683, 1683, 1683, 1683, 1683, 1685, 1685, 1687, 1687,
-     1687, 1689, 1689, 1689, 1689, 1689, 1691, 1691, 1691, 1691, 1691, 1691,
-     1691, 1691, 1691, 1691, 1691, 1691, 1691, 1691, 1691, 1691, 1691, 1691,
-     1691, 1691, 1693, 1693, 1693, 1695, 1697, 1697, 1697, 1697, 1697, 1697,
-     1697, 1697, 1697, 1697, 1697, 1697, 1697, 1699, 1701, 1701, 1701, 1703,
-     1705, 1705, 1705, 1707, 1709, 1711, 1713, 1713, 1713, 1713, 1713, 1715,
-     1717, 1717, 1717, 1719, 1721, 1721, 1721, 1721, 1721, 1721, 1721, 1721,
-     1721, 1721, 1723, 1725, 1725, 1725, 1725, 1725, 1725, 1725, 1725, 1725,
-     1725, 1725, 1725, 1725, 1725, 1725, 1725, 1727, 1727, 1727, 1727, 1727,
-     1727, 1729, 1731, 1731, 1733, 1733, 1733, 1733, 1733, 1733, 1733, 1735,
-     1737, 1739, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
-     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
-     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
-     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
-     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
-     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
-     1741, 1741, 1741, 1741, 1741},
-    {1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
-     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
-     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
-     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
-     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
-     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1743,
-     1743, 1743, 1743, 1743, 1745, 1745, 1747, 1747, 1749, 1749, 1751, 1751,
-     1753, 1753, 1755, 1755, 1757, 1757, 1759, 1759, 1761, 1761, 1763, 1763,
-     1765, 1765, 1767, 1767, 1767, 1769, 1769, 1771, 1771, 1773, 1773, 1773,
-     1773, 1773, 1773, 1773, 1777, 1777, 1777, 1781, 1781, 1781, 1785, 1785,
-     1785, 1789, 1789, 1789, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793,
-     1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793,
-     1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793,
-     1793, 1793, 1795, 1795, 1795, 1795, 1795, 1795, 1795, 1795, 1795, 1797,
-     1797, 1797, 1797, 1797, 1799, 1799, 1801, 1801, 1803, 1803, 1805, 1805,
-     1807, 1807, 1809, 1809, 1811, 1811, 1813, 1813, 1815, 1815, 1817, 1817,
-     1819, 1819, 1821, 1821, 1821, 1823, 1823, 1825, 1825, 1827, 1827, 1827,
-     1827, 1827, 1827, 1827, 1831, 1831, 1831, 1835, 1835, 1835, 1839, 1839,
-     1839, 1843, 1843, 1843, 1847, 1847, 1847, 1847, 1847, 1847, 1847, 1847,
-     1847, 1847, 1847, 1847, 1847, 1847, 1847, 1847, 1847, 1847, 1847, 1847,
-     1849, 1851, 1853, 1855, 1855, 1855, 1855, 1855, 1855, 1855, 1855, 1855,
-     1855, 1855, 1857, 1857, 1857},
-    {1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
-     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
-     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
-     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
-     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
-     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
-     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
-     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
-     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
-     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
-     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
-     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
-     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1859, 1859,
-     1861, 1861, 1861, 1861, 1861, 1861, 1861, 1861, 1861, 1861, 1863, 1863,
-     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
-     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
-     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
-     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
-     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
-     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
-     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
-     1863, 1863, 1863, 1863, 1863},
-    {1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
-     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
-     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
-     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
-     1863, 1863, 1865, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867},
-    {1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871},
-    {1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
-     1871, 1871, 1871, 1871, 1871, 1871, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877},
-    {1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
-     1877, 1877, 1877, 1877, 1877, 1879, 1881, 1881, 1881, 1881, 1881, 1881,
-     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
-     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
-     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
-     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
-     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
-     1881, 1881, 1881, 1881, 1881},
-    {1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
-     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
-     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
-     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
-     1881, 1881, 1881, 1881, 1881, 1881, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
-     1883, 1883, 1883, 1883, 1883}};
-const char32_t uninorms::composition_data[] = {
-    0,     824,   8814,  824,   8800,  824,   8815,  768,   192,   769,   193,
-    770,   194,   771,   195,   772,   256,   774,   258,   775,   550,   776,
-    196,   777,   7842,  778,   197,   780,   461,   783,   512,   785,   514,
-    803,   7840,  805,   7680,  808,   260,   775,   7682,  803,   7684,  817,
-    7686,  769,   262,   770,   264,   775,   266,   780,   268,   807,   199,
-    775,   7690,  780,   270,   803,   7692,  807,   7696,  813,   7698,  817,
-    7694,  768,   200,   769,   201,   770,   202,   771,   7868,  772,   274,
-    774,   276,   775,   278,   776,   203,   777,   7866,  780,   282,   783,
-    516,   785,   518,   803,   7864,  807,   552,   808,   280,   813,   7704,
-    816,   7706,  775,   7710,  769,   500,   770,   284,   772,   7712,  774,
-    286,   775,   288,   780,   486,   807,   290,   770,   292,   775,   7714,
-    776,   7718,  780,   542,   803,   7716,  807,   7720,  814,   7722,  768,
-    204,   769,   205,   770,   206,   771,   296,   772,   298,   774,   300,
-    775,   304,   776,   207,   777,   7880,  780,   463,   783,   520,   785,
-    522,   803,   7882,  808,   302,   816,   7724,  770,   308,   769,   7728,
-    780,   488,   803,   7730,  807,   310,   817,   7732,  769,   313,   780,
-    317,   803,   7734,  807,   315,   813,   7740,  817,   7738,  769,   7742,
-    775,   7744,  803,   7746,  768,   504,   769,   323,   771,   209,   775,
-    7748,  780,   327,   803,   7750,  807,   325,   813,   7754,  817,   7752,
-    768,   210,   769,   211,   770,   212,   771,   213,   772,   332,   774,
-    334,   775,   558,   776,   214,   777,   7886,  779,   336,   780,   465,
-    783,   524,   785,   526,   795,   416,   803,   7884,  808,   490,   769,
-    7764,  775,   7766,  769,   340,   775,   7768,  780,   344,   783,   528,
-    785,   530,   803,   7770,  807,   342,   817,   7774,  769,   346,   770,
-    348,   775,   7776,  780,   352,   803,   7778,  806,   536,   807,   350,
-    775,   7786,  780,   356,   803,   7788,  806,   538,   807,   354,   813,
-    7792,  817,   7790,  768,   217,   769,   218,   770,   219,   771,   360,
-    772,   362,   774,   364,   776,   220,   777,   7910,  778,   366,   779,
-    368,   780,   467,   783,   532,   785,   534,   795,   431,   803,   7908,
-    804,   7794,  808,   370,   813,   7798,  816,   7796,  771,   7804,  803,
-    7806,  768,   7808,  769,   7810,  770,   372,   775,   7814,  776,   7812,
-    803,   7816,  775,   7818,  776,   7820,  768,   7922,  769,   221,   770,
-    374,   771,   7928,  772,   562,   775,   7822,  776,   376,   777,   7926,
-    803,   7924,  769,   377,   770,   7824,  775,   379,   780,   381,   803,
-    7826,  817,   7828,  768,   224,   769,   225,   770,   226,   771,   227,
-    772,   257,   774,   259,   775,   551,   776,   228,   777,   7843,  778,
-    229,   780,   462,   783,   513,   785,   515,   803,   7841,  805,   7681,
-    808,   261,   775,   7683,  803,   7685,  817,   7687,  769,   263,   770,
-    265,   775,   267,   780,   269,   807,   231,   775,   7691,  780,   271,
-    803,   7693,  807,   7697,  813,   7699,  817,   7695,  768,   232,   769,
-    233,   770,   234,   771,   7869,  772,   275,   774,   277,   775,   279,
-    776,   235,   777,   7867,  780,   283,   783,   517,   785,   519,   803,
-    7865,  807,   553,   808,   281,   813,   7705,  816,   7707,  775,   7711,
-    769,   501,   770,   285,   772,   7713,  774,   287,   775,   289,   780,
-    487,   807,   291,   770,   293,   775,   7715,  776,   7719,  780,   543,
-    803,   7717,  807,   7721,  814,   7723,  817,   7830,  768,   236,   769,
-    237,   770,   238,   771,   297,   772,   299,   774,   301,   776,   239,
-    777,   7881,  780,   464,   783,   521,   785,   523,   803,   7883,  808,
-    303,   816,   7725,  770,   309,   780,   496,   769,   7729,  780,   489,
-    803,   7731,  807,   311,   817,   7733,  769,   314,   780,   318,   803,
-    7735,  807,   316,   813,   7741,  817,   7739,  769,   7743,  775,   7745,
-    803,   7747,  768,   505,   769,   324,   771,   241,   775,   7749,  780,
-    328,   803,   7751,  807,   326,   813,   7755,  817,   7753,  768,   242,
-    769,   243,   770,   244,   771,   245,   772,   333,   774,   335,   775,
-    559,   776,   246,   777,   7887,  779,   337,   780,   466,   783,   525,
-    785,   527,   795,   417,   803,   7885,  808,   491,   769,   7765,  775,
-    7767,  769,   341,   775,   7769,  780,   345,   783,   529,   785,   531,
-    803,   7771,  807,   343,   817,   7775,  769,   347,   770,   349,   775,
-    7777,  780,   353,   803,   7779,  806,   537,   807,   351,   775,   7787,
-    776,   7831,  780,   357,   803,   7789,  806,   539,   807,   355,   813,
-    7793,  817,   7791,  768,   249,   769,   250,   770,   251,   771,   361,
-    772,   363,   774,   365,   776,   252,   777,   7911,  778,   367,   779,
-    369,   780,   468,   783,   533,   785,   535,   795,   432,   803,   7909,
-    804,   7795,  808,   371,   813,   7799,  816,   7797,  771,   7805,  803,
-    7807,  768,   7809,  769,   7811,  770,   373,   775,   7815,  776,   7813,
-    778,   7832,  803,   7817,  775,   7819,  776,   7821,  768,   7923,  769,
-    253,   770,   375,   771,   7929,  772,   563,   775,   7823,  776,   255,
-    777,   7927,  778,   7833,  803,   7925,  769,   378,   770,   7825,  775,
-    380,   780,   382,   803,   7827,  817,   7829,  768,   8173,  769,   901,
-    834,   8129,  768,   7846,  769,   7844,  771,   7850,  777,   7848,  772,
-    478,   769,   506,   769,   508,   772,   482,   769,   7688,  768,   7872,
-    769,   7870,  771,   7876,  777,   7874,  769,   7726,  768,   7890,  769,
-    7888,  771,   7894,  777,   7892,  769,   7756,  772,   556,   776,   7758,
-    772,   554,   769,   510,   768,   475,   769,   471,   772,   469,   780,
-    473,   768,   7847,  769,   7845,  771,   7851,  777,   7849,  772,   479,
-    769,   507,   769,   509,   772,   483,   769,   7689,  768,   7873,  769,
-    7871,  771,   7877,  777,   7875,  769,   7727,  768,   7891,  769,   7889,
-    771,   7895,  777,   7893,  769,   7757,  772,   557,   776,   7759,  772,
-    555,   769,   511,   768,   476,   769,   472,   772,   470,   780,   474,
-    768,   7856,  769,   7854,  771,   7860,  777,   7858,  768,   7857,  769,
-    7855,  771,   7861,  777,   7859,  768,   7700,  769,   7702,  768,   7701,
-    769,   7703,  768,   7760,  769,   7762,  768,   7761,  769,   7763,  775,
-    7780,  775,   7781,  775,   7782,  775,   7783,  769,   7800,  769,   7801,
-    776,   7802,  776,   7803,  775,   7835,  768,   7900,  769,   7898,  771,
-    7904,  777,   7902,  803,   7906,  768,   7901,  769,   7899,  771,   7905,
-    777,   7903,  803,   7907,  768,   7914,  769,   7912,  771,   7918,  777,
-    7916,  803,   7920,  768,   7915,  769,   7913,  771,   7919,  777,   7917,
-    803,   7921,  780,   494,   772,   492,   772,   493,   772,   480,   772,
-    481,   774,   7708,  774,   7709,  772,   560,   772,   561,   780,   495,
-    768,   8122,  769,   902,   772,   8121,  774,   8120,  787,   7944,  788,
-    7945,  837,   8124,  768,   8136,  769,   904,   787,   7960,  788,   7961,
-    768,   8138,  769,   905,   787,   7976,  788,   7977,  837,   8140,  768,
-    8154,  769,   906,   772,   8153,  774,   8152,  776,   938,   787,   7992,
-    788,   7993,  768,   8184,  769,   908,   787,   8008,  788,   8009,  788,
-    8172,  768,   8170,  769,   910,   772,   8169,  774,   8168,  776,   939,
-    788,   8025,  768,   8186,  769,   911,   787,   8040,  788,   8041,  837,
-    8188,  837,   8116,  837,   8132,  768,   8048,  769,   940,   772,   8113,
-    774,   8112,  787,   7936,  788,   7937,  834,   8118,  837,   8115,  768,
-    8050,  769,   941,   787,   7952,  788,   7953,  768,   8052,  769,   942,
-    787,   7968,  788,   7969,  834,   8134,  837,   8131,  768,   8054,  769,
-    943,   772,   8145,  774,   8144,  776,   970,   787,   7984,  788,   7985,
-    834,   8150,  768,   8056,  769,   972,   787,   8000,  788,   8001,  787,
-    8164,  788,   8165,  768,   8058,  769,   973,   772,   8161,  774,   8160,
-    776,   971,   787,   8016,  788,   8017,  834,   8166,  768,   8060,  769,
-    974,   787,   8032,  788,   8033,  834,   8182,  837,   8179,  768,   8146,
-    769,   912,   834,   8151,  768,   8162,  769,   944,   834,   8167,  837,
-    8180,  769,   979,   776,   980,   776,   1031,  774,   1232,  776,   1234,
-    769,   1027,  768,   1024,  774,   1238,  776,   1025,  774,   1217,  776,
-    1244,  776,   1246,  768,   1037,  772,   1250,  774,   1049,  776,   1252,
-    769,   1036,  776,   1254,  772,   1262,  774,   1038,  776,   1264,  779,
-    1266,  776,   1268,  776,   1272,  776,   1260,  774,   1233,  776,   1235,
-    769,   1107,  768,   1104,  774,   1239,  776,   1105,  774,   1218,  776,
-    1245,  776,   1247,  768,   1117,  772,   1251,  774,   1081,  776,   1253,
-    769,   1116,  776,   1255,  772,   1263,  774,   1118,  776,   1265,  779,
-    1267,  776,   1269,  776,   1273,  776,   1261,  776,   1111,  783,   1142,
-    783,   1143,  776,   1242,  776,   1243,  776,   1258,  776,   1259,  1619,
-    1570,  1620,  1571,  1621,  1573,  1620,  1572,  1620,  1574,  1620,  1730,
-    1620,  1747,  1620,  1728,  2364,  2345,  2364,  2353,  2364,  2356,  2494,
-    2507,  2519,  2508,  2878,  2891,  2902,  2888,  2903,  2892,  3031,  2964,
-    3006,  3018,  3031,  3020,  3006,  3019,  3158,  3144,  3285,  3264,  3266,
-    3274,  3285,  3271,  3286,  3272,  3285,  3275,  3390,  3402,  3415,  3404,
-    3390,  3403,  3530,  3546,  3535,  3548,  3551,  3550,  3530,  3549,  4142,
-    4134,  6965,  6918,  6965,  6920,  6965,  6922,  6965,  6924,  6965,  6926,
-    6965,  6930,  6965,  6971,  6965,  6973,  6965,  6976,  6965,  6977,  6965,
-    6979,  772,   7736,  772,   7737,  772,   7772,  772,   7773,  775,   7784,
-    775,   7785,  770,   7852,  774,   7862,  770,   7853,  774,   7863,  770,
-    7878,  770,   7879,  770,   7896,  770,   7897,  768,   7938,  769,   7940,
-    834,   7942,  837,   8064,  768,   7939,  769,   7941,  834,   7943,  837,
-    8065,  837,   8066,  837,   8067,  837,   8068,  837,   8069,  837,   8070,
-    837,   8071,  768,   7946,  769,   7948,  834,   7950,  837,   8072,  768,
-    7947,  769,   7949,  834,   7951,  837,   8073,  837,   8074,  837,   8075,
-    837,   8076,  837,   8077,  837,   8078,  837,   8079,  768,   7954,  769,
-    7956,  768,   7955,  769,   7957,  768,   7962,  769,   7964,  768,   7963,
-    769,   7965,  768,   7970,  769,   7972,  834,   7974,  837,   8080,  768,
-    7971,  769,   7973,  834,   7975,  837,   8081,  837,   8082,  837,   8083,
-    837,   8084,  837,   8085,  837,   8086,  837,   8087,  768,   7978,  769,
-    7980,  834,   7982,  837,   8088,  768,   7979,  769,   7981,  834,   7983,
-    837,   8089,  837,   8090,  837,   8091,  837,   8092,  837,   8093,  837,
-    8094,  837,   8095,  768,   7986,  769,   7988,  834,   7990,  768,   7987,
-    769,   7989,  834,   7991,  768,   7994,  769,   7996,  834,   7998,  768,
-    7995,  769,   7997,  834,   7999,  768,   8002,  769,   8004,  768,   8003,
-    769,   8005,  768,   8010,  769,   8012,  768,   8011,  769,   8013,  768,
-    8018,  769,   8020,  834,   8022,  768,   8019,  769,   8021,  834,   8023,
-    768,   8027,  769,   8029,  834,   8031,  768,   8034,  769,   8036,  834,
-    8038,  837,   8096,  768,   8035,  769,   8037,  834,   8039,  837,   8097,
-    837,   8098,  837,   8099,  837,   8100,  837,   8101,  837,   8102,  837,
-    8103,  768,   8042,  769,   8044,  834,   8046,  837,   8104,  768,   8043,
-    769,   8045,  834,   8047,  837,   8105,  837,   8106,  837,   8107,  837,
-    8108,  837,   8109,  837,   8110,  837,   8111,  837,   8114,  837,   8130,
-    837,   8178,  837,   8119,  768,   8141,  769,   8142,  834,   8143,  837,
-    8135,  837,   8183,  768,   8157,  769,   8158,  834,   8159,  824,   8602,
-    824,   8603,  824,   8622,  824,   8653,  824,   8655,  824,   8654,  824,
-    8708,  824,   8713,  824,   8716,  824,   8740,  824,   8742,  824,   8769,
-    824,   8772,  824,   8775,  824,   8777,  824,   8813,  824,   8802,  824,
-    8816,  824,   8817,  824,   8820,  824,   8821,  824,   8824,  824,   8825,
-    824,   8832,  824,   8833,  824,   8928,  824,   8929,  824,   8836,  824,
-    8837,  824,   8840,  824,   8841,  824,   8930,  824,   8931,  824,   8876,
-    824,   8877,  824,   8878,  824,   8879,  824,   8938,  824,   8939,  824,
-    8940,  824,   8941,  12441, 12436, 12441, 12364, 12441, 12366, 12441, 12368,
-    12441, 12370, 12441, 12372, 12441, 12374, 12441, 12376, 12441, 12378, 12441,
-    12380, 12441, 12382, 12441, 12384, 12441, 12386, 12441, 12389, 12441, 12391,
-    12441, 12393, 12441, 12400, 12442, 12401, 12441, 12403, 12442, 12404, 12441,
-    12406, 12442, 12407, 12441, 12409, 12442, 12410, 12441, 12412, 12442, 12413,
-    12441, 12446, 12441, 12532, 12441, 12460, 12441, 12462, 12441, 12464, 12441,
-    12466, 12441, 12468, 12441, 12470, 12441, 12472, 12441, 12474, 12441, 12476,
-    12441, 12478, 12441, 12480, 12441, 12482, 12441, 12485, 12441, 12487, 12441,
-    12489, 12441, 12496, 12442, 12497, 12441, 12499, 12442, 12500, 12441, 12502,
-    12442, 12503, 12441, 12505, 12442, 12506, 12441, 12508, 12442, 12509, 12441,
-    12535, 12441, 12536, 12441, 12537, 12441, 12538, 12441, 12542, 69818, 69786,
-    69818, 69788, 69818, 69803, 69927, 69934, 69927, 69935, 70462, 70475, 70487,
-    70476, 70832, 70844, 70842, 70843, 70845, 70846, 71087, 71098, 71087, 71099,
-    71984, 71992};
-
-const uint8_t uninorms::decomposition_index[uninorms::CHARS >> 8] = {
+const uint8_t decomposition_index[4352] = {
     0,  1,  2,  3,  4,  5,  6,  7,  7,  8,  9,  10, 11, 12, 13, 14, 15, 7,  7,
     7,  7,  7,  7,  7,  7,  7,  7,  16, 7,  17, 18, 19, 20, 21, 22, 23, 24, 7,
     7,  7,  7,  7,  25, 7,  26, 27, 28, 29, 30, 31, 32, 33, 7,  7,  7,  7,  7,
@@ -5334,7 +3081,8 @@ const uint8_t uninorms::decomposition_index[uninorms::CHARS >> 8] = {
     7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,
     7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,
     7};
-const uint16_t uninorms::decomposition_block[][257] = {
+
+const uint16_t decomposition_block[67][257] = {
     {4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,
      4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,
      4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,
@@ -6978,7 +4726,7 @@ const uint16_t uninorms::decomposition_block[][257] = {
      36408, 36408, 36408, 36408, 36408, 36408, 36408, 36408, 36408, 36408,
      36408, 36408, 36408, 36408, 36408, 36408, 36408, 36408, 36408, 36408,
      36408, 36408, 36408, 36408, 36408, 36408, 36408}};
-const char32_t uninorms::decomposition_data[] = {
+const char32_t decomposition_data[9102] = {
     0,      32,     32,     776,    97,     32,     772,    50,     51,
     32,     769,    956,    32,     807,    49,     111,    49,     8260,
     52,     49,     8260,   50,     51,     8260,   52,     65,     768,
@@ -7992,17 +5740,2206 @@ const char32_t uninorms::decomposition_data[] = {
     172293, 172558, 172689, 40635,  19798,  40697,  40702,  40709,  40719,
     40726,  40763,  173568};
 
-}  // namespace unilib
-}  // namespace ufal
-/* end file src/unilib/uninorms.cpp */
+const uint8_t canonical_combining_class_index[4352] = {
+    0,  0,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 0,  0,
+    15, 0,  0,  0,  16, 17, 18, 19, 20, 21, 22, 0,  0,  23, 0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  24, 25, 0,  0,  26, 0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  27, 0,  28, 29, 30,
+    31, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  32, 0,  0,  33, 0,  0,  34, 35, 36, 0,  0,  0,  0,  0,  0,
+    37, 0,  0,  38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 0,  52,
+    53, 0,  54, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  55, 56, 0,  0,  0,  57, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  58, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  59, 60, 0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  61, 56, 62, 0,  63, 0,  0,  0,  64, 65, 0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0};
+const uint8_t canonical_combining_class_block[67][256] = {
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
+     230, 230, 230, 230, 230, 230, 232, 220, 220, 220, 220, 232, 216, 220, 220,
+     220, 220, 220, 202, 202, 220, 220, 220, 220, 202, 202, 220, 220, 220, 220,
+     220, 220, 220, 220, 220, 220, 220, 1,   1,   1,   1,   1,   220, 220, 220,
+     220, 230, 230, 230, 230, 230, 230, 230, 230, 240, 230, 220, 220, 220, 230,
+     230, 230, 220, 220, 0,   230, 230, 230, 220, 220, 220, 220, 230, 232, 220,
+     220, 230, 233, 234, 234, 233, 234, 234, 233, 230, 230, 230, 230, 230, 230,
+     230, 230, 230, 230, 230, 230, 230, 0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0},
+    {0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 230,
+     230, 230, 230, 230, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   220, 230, 230, 230, 230,
+     220, 230, 230, 230, 222, 220, 230, 230, 230, 230, 230, 230, 220, 220, 220,
+     220, 220, 220, 230, 230, 220, 230, 230, 222, 228, 230, 10,  11,  12,  13,
+     14,  15,  16,  17,  18,  19,  19,  20,  21,  22,  0,   23,  0,   24,  25,
+     0,   230, 220, 0,   18,  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0},
+    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   230, 230, 230, 230, 230, 230, 230, 230, 30,  31,  32,  0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     27,  28,  29,  30,  31,  32,  33,  34,  230, 230, 220, 220, 230, 230, 230,
+     230, 230, 220, 230, 230, 220, 0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   35,  0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   230, 230, 230, 230, 230, 230, 230, 0,   0,   230, 230,
+     230, 230, 220, 230, 0,   0,   230, 230, 0,   220, 230, 230, 220, 0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0},
+    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   36,  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   230, 220, 230, 230, 220, 230, 230, 220, 220, 220, 230, 220,
+     220, 230, 220, 230, 230, 230, 220, 230, 220, 230, 220, 230, 220, 230, 230,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230, 230, 230, 230, 230,
+     230, 230, 220, 230, 0,   0,   0,   0,   0,   0,   0,   0,   0,   220, 0,
+     0},
+    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   230, 230, 230, 230, 0,   230, 230, 230,
+     230, 230, 230, 230, 230, 230, 0,   230, 230, 230, 0,   230, 230, 230, 230,
+     230, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   220,
+     220, 220, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   230, 220, 220, 220, 230, 230, 230, 230, 0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   230, 230, 230, 230, 230, 220, 220, 220,
+     220, 220, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
+     230, 0,   220, 230, 230, 220, 230, 230, 220, 230, 230, 230, 220, 220, 220,
+     27,  28,  29,  230, 230, 230, 220, 230, 230, 220, 220, 230, 230, 230, 230,
+     230},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   7,   0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0,   0, 0, 230, 220, 230, 230, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7,   0, 0, 0,   0,   0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0,   0,   0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 230, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 84, 91, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 7, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   103, 103, 9,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     107, 107, 107, 107, 0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   118, 118, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   122, 122, 122, 122, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0},
+    {0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
+     0,   0, 0,   0,   0,   0,   0, 0, 0,   220, 220, 0,   0,   0, 0,
+     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
+     0,   0, 0,   0,   0,   0,   0, 0, 220, 0,   220, 0,   216, 0, 0,
+     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
+     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
+     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
+     0,   0, 0,   0,   0,   0,   0, 0, 129, 130, 0,   132, 0,   0, 0,
+     0,   0, 130, 130, 130, 130, 0, 0, 130, 0,   230, 230, 9,   0, 230,
+     230, 0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
+     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
+     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
+     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
+     0,   0, 0,   220, 0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
+     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
+     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
+     0,   0, 0,   0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0, 0,
+     0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 7, 0, 9, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 220, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 230, 230, 230, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 9, 0, 0,
+     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 9, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 230, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 228, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 222, 230, 220, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   230, 220, 0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   9,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230, 230, 230,
+     230, 230, 230, 230, 230, 0,   0,   220, 0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230, 230, 230, 230,
+     230, 220, 220, 220, 220, 220, 220, 230, 230, 220, 0,   220, 220, 230, 230,
+     220, 220, 230, 230, 230, 230, 230, 220, 230, 230, 230, 230, 0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0},
+    {0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   7,   0,   0,   0,   0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 230, 220, 230, 230, 230, 230, 230,
+     230, 230, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   9,
+     9,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,
+     0,   0,   7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   9,   9,   0,   0,   0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0},
+    {0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   7,   0,   0,   0,   0,
+     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230, 230,
+     230, 0, 1, 220, 220, 220, 220, 220, 230, 230, 220, 220, 220, 220, 230,
+     0,   1, 1, 1,   1,   1,   1,   1,   0,   0,   0,   0,   220, 0,   0,
+     0,   0, 0, 0,   230, 0,   0,   0,   230, 230, 0,   0,   0,   0,   0,
+     0},
+    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230, 230, 220,
+     230, 230, 230, 230, 230, 230, 230, 220, 230, 230, 234, 214, 220, 202, 230,
+     230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
+     230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
+     230, 230, 230, 230, 230, 230, 232, 228, 228, 220, 218, 230, 233, 220, 230,
+     220},
+    {0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,
+     230, 230, 1, 1, 230, 230, 230, 230, 1,   1,   1, 230, 230, 0,   0,   0,
+     0,   230, 0, 0, 0,   1,   1,   230, 220, 230, 1, 1,   220, 220, 220, 220,
+     230, 0,   0, 0, 0,   0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 230, 230, 230,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   9,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230,
+     230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
+     230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
+     230},
+    {0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 218, 228, 232, 222, 224, 224, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 8, 8, 0, 0, 0, 0, 0,
+     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0},
+    {0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230,
+     0,   0,   0, 0, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230, 230,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     230, 230, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0},
+    {0,   0,   0,   0,   0,   0,   9,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   9,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   9,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   230,
+     230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 230,
+     230, 230, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0},
+    {0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 220,
+     220, 220, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
+     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
+     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
+     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
+     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
+     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
+     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
+     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
+     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
+     0,   0,   0, 0,   0, 230, 0, 230, 230, 220, 0, 0, 230, 230, 0, 0, 0, 0, 0,
+     230, 230, 0, 230, 0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
+     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 0,
+     0,   0,   0, 0,   0, 0,   0, 0,   0,   0,   0, 0, 0,   0,   0, 0, 0, 0, 9,
+     0,   0,   0, 0,   0, 0,   0, 0,   0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 26, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   230, 230, 230, 230, 230, 230, 230, 220, 220, 220, 220, 220, 220,
+     220, 230, 230, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 220, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 220, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 230, 230, 230, 230, 230, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 220, 0, 230, 0,   0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   230, 1, 220, 0,
+     0, 0, 0, 9, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0,   0,   0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 230, 220, 0, 0, 0,   0, 0,   0,   0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0, 0, 0,   0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 230, 230, 230, 230, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 230, 230, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0, 0, 0, 0,   0,   0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 220, 220, 220},
+    {0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 220, 220,
+     230, 230, 230, 220, 230, 220, 220, 220, 220, 0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0,   0,   0,   0,   230, 220, 230, 220, 0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0,   0,   0,   0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 7, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {230, 230, 230, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 9, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 9, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 9, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
+     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
+     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
+     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   7,   7,   0, 0, 0,
+     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   9, 0, 0,
+     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
+     0,   0,   0,   0,   0,   0, 230, 230, 230, 230, 230, 230, 230, 0, 0, 0,
+     230, 230, 230, 230, 230, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
+     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
+     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
+     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
+     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
+     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
+     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
+     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0,
+     0,   0,   0,   0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 7,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 230, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0, 0, 9, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9,
+     7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 7, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 9, 0, 0, 0, 0, 7, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 9, 9, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 9, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 230, 230, 230, 230, 230, 230, 230, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     6, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0, 0, 216, 216, 1,   1,   1,   0,   0,   0,   226, 216, 216,
+     216, 216, 216, 0, 0, 0,   0,   0,   0,   0,   0,   220, 220, 220, 220, 220,
+     220, 220, 220, 0, 0, 230, 230, 230, 230, 230, 220, 220, 0,   0,   0,   0,
+     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   230, 230, 230, 230, 0,   0,
+     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0, 0, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0},
+    {0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     230, 230, 230, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,   0,   0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {230, 230, 230, 230, 230, 230, 230, 0,   230, 230, 230, 230, 230, 230, 230,
+     230, 230, 230, 230, 230, 230, 230, 230, 230, 230, 0,   0,   230, 230, 230,
+     230, 230, 230, 230, 0,   230, 230, 0,   230, 230, 230, 230, 230, 0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   230, 0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+     0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   230, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 230, 230, 230, 230, 0,   0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 232, 232, 220, 230, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 220, 220, 220, 220, 220, 220, 220, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0,   0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 230, 230, 230, 230, 230, 230, 7, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0,   0,   0,   0,   0,   0,   0, 0}};
+
+const uint8_t composition_index[4352] = {
+    0, 1, 2, 3, 4,  5,  6, 5, 5,  7,  5, 8,  9,  10, 5, 5, 11, 5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  12, 5, 5, 13, 14, 5, 15, 16, 5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 17, 5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 18, 19, 5, 20, 21, 22, 5, 5, 5,  23, 5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5,  5, 5, 5, 5,
+    5, 5, 5, 5, 5,  5,  5, 5, 5,  5,  5, 5,  5,  5,  5, 5, 5,  5};
+const uint16_t composition_block[67][257] = {
+    {1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,
+     1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,
+     1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,
+     1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,
+     1,   3,   5,   7,   7,   7,   39,  45,  55,  67,  101, 103, 117, 131, 161,
+     163, 173, 185, 191, 209, 241, 245, 245, 261, 275, 289, 327, 331, 343, 347,
+     365, 377, 377, 377, 377, 377, 377, 377, 409, 415, 425, 437, 471, 473, 487,
+     503, 531, 535, 545, 557, 563, 581, 613, 617, 617, 633, 647, 663, 701, 705,
+     719, 723, 743, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755,
+     755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755,
+     755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755, 755,
+     755, 755, 755, 755, 761, 761, 761, 761, 761, 761, 761, 761, 761, 761, 761,
+     761, 761, 761, 761, 761, 761, 761, 761, 761, 761, 761, 761, 761, 761, 761,
+     769, 769, 771, 773, 777, 779, 779, 779, 787, 787, 787, 787, 787, 789, 789,
+     789, 789, 789, 797, 803, 805, 805, 807, 807, 807, 807, 815, 815, 815, 815,
+     815, 815, 823, 823, 825, 827, 831, 833, 833, 833, 841, 841, 841, 841, 841,
+     843, 843, 843, 843, 843, 851, 857, 859, 859, 861, 861, 861, 861, 869, 869,
+     869, 869},
+    {869, 869, 869, 877, 885, 885, 885, 885, 885, 885, 885, 885, 885, 885, 885,
+     885, 885, 885, 885, 889, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893,
+     893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893,
+     893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893,
+     893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893, 893,
+     893, 893, 897, 901, 901, 901, 901, 901, 901, 901, 901, 901, 901, 901, 901,
+     901, 903, 905, 905, 905, 905, 905, 907, 909, 909, 909, 909, 909, 909, 909,
+     911, 913, 915, 917, 917, 917, 917, 917, 917, 917, 917, 917, 917, 917, 917,
+     917, 917, 917, 917, 917, 917, 917, 917, 919, 919, 919, 919, 919, 919, 919,
+     919, 919, 919, 919, 919, 919, 919, 919, 919, 919, 919, 919, 919, 919, 919,
+     919, 919, 919, 919, 919, 919, 919, 919, 919, 919, 919, 929, 939, 939, 939,
+     939, 939, 939, 939, 939, 939, 939, 939, 939, 939, 939, 949, 959, 959, 959,
+     959, 959, 959, 959, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961,
+     961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961,
+     961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 961,
+     961, 961, 961, 961, 961, 961, 961, 961, 961, 961, 963, 965, 965, 965, 965,
+     965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965,
+     965, 965},
+    {965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965,
+     965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965, 965,
+     965, 965, 965, 965, 965, 965, 965, 965, 965, 967, 969, 971, 973, 973, 973,
+     973, 973, 975, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977,
+     977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977,
+     977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977,
+     977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977,
+     977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977,
+     977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977,
+     977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 977, 979, 979, 979,
+     979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979,
+     979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979,
+     979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979,
+     979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979,
+     979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979,
+     979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979,
+     979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979, 979,
+     979, 979},
+    {979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
+     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
+     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
+     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
+     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
+     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
+     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
+     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
+     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
+     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
+     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
+     979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,  979,
+     979,  979,  993,  993,  993,  993,  1001, 1001, 1011, 1011, 1025, 1025,
+     1025, 1025, 1025, 1025, 1033, 1033, 1035, 1035, 1035, 1035, 1047, 1047,
+     1047, 1047, 1057, 1057, 1057, 1059, 1059, 1061, 1061, 1061, 1077, 1077,
+     1077, 1077, 1085, 1085, 1097, 1097, 1113, 1113, 1113, 1113, 1113, 1113,
+     1121, 1121, 1125, 1125, 1125, 1125, 1141, 1141, 1141, 1141, 1153, 1159,
+     1165, 1165, 1165, 1167, 1167, 1167, 1167, 1171, 1171, 1171, 1171, 1171,
+     1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171,
+     1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171,
+     1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171,
+     1171, 1171, 1171, 1171, 1171},
+    {1171, 1171, 1171, 1171, 1171, 1171, 1171, 1173, 1173, 1173, 1173, 1173,
+     1173, 1173, 1173, 1173, 1173, 1177, 1177, 1177, 1179, 1179, 1185, 1189,
+     1191, 1199, 1199, 1201, 1201, 1201, 1201, 1203, 1203, 1203, 1203, 1203,
+     1211, 1211, 1211, 1211, 1213, 1213, 1213, 1213, 1215, 1215, 1217, 1217,
+     1217, 1221, 1221, 1221, 1223, 1223, 1229, 1233, 1235, 1243, 1243, 1245,
+     1245, 1245, 1245, 1247, 1247, 1247, 1247, 1247, 1255, 1255, 1255, 1255,
+     1257, 1257, 1257, 1257, 1259, 1259, 1261, 1261, 1261, 1261, 1261, 1261,
+     1261, 1261, 1261, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263,
+     1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263,
+     1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1263, 1265, 1267, 1267,
+     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
+     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
+     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
+     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
+     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
+     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
+     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
+     1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267, 1267,
+     1267, 1269, 1271, 1271, 1271, 1271, 1271, 1271, 1271, 1271, 1271, 1271,
+     1271, 1271, 1271, 1271, 1271, 1273, 1275, 1275, 1275, 1275, 1275, 1275,
+     1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275,
+     1275, 1275, 1275, 1275, 1275},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275,
+     1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275,
+     1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275, 1275,
+     1275, 1275, 1275, 1275, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281,
+     1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281,
+     1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281, 1281,
+     1281, 1283, 1283, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
+     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
+     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
+     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
+     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
+     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
+     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
+     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
+     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
+     1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285, 1285,
+     1285, 1285, 1287, 1287, 1287, 1287, 1287, 1287, 1287, 1287, 1287, 1287,
+     1287, 1287, 1287, 1287, 1287, 1287, 1287, 1289, 1289, 1289, 1291, 1291,
+     1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291,
+     1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291,
+     1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291,
+     1291, 1291, 1291, 1291, 1291},
+    {1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291,
+     1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291,
+     1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291, 1291,
+     1291, 1291, 1291, 1291, 1291, 1293, 1293, 1293, 1293, 1293, 1293, 1293,
+     1293, 1295, 1295, 1295, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
+     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
+     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
+     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
+     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
+     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
+     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
+     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
+     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
+     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
+     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
+     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297,
+     1297, 1297, 1297, 1297, 1297, 1297, 1297, 1297, 1301, 1301, 1301, 1301,
+     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
+     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
+     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
+     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
+     1301, 1301, 1301, 1301, 1301},
+    {1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
+     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
+     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
+     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
+     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
+     1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301, 1301,
+     1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307,
+     1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307,
+     1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307,
+     1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307,
+     1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307,
+     1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307, 1307,
+     1307, 1307, 1307, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309,
+     1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309,
+     1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309,
+     1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309, 1309,
+     1309, 1309, 1309, 1309, 1309, 1309, 1309, 1313, 1315, 1315, 1315, 1315,
+     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
+     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
+     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
+     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
+     1315, 1315, 1315, 1315, 1315},
+    {1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
+     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
+     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
+     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
+     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315,
+     1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1315, 1317,
+     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
+     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
+     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
+     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
+     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
+     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
+     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
+     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
+     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
+     1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317, 1317,
+     1319, 1319, 1319, 1319, 1319, 1319, 1319, 1325, 1325, 1325, 1325, 1327,
+     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
+     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
+     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
+     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
+     1327, 1327, 1327, 1327, 1327},
+    {1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
+     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
+     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
+     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
+     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327,
+     1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1327, 1331,
+     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
+     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
+     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
+     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
+     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
+     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
+     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
+     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
+     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
+     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
+     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
+     1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333, 1333,
+     1333, 1333, 1339, 1339, 1339, 1341, 1341, 1341, 1341, 1341, 1341, 1341,
+     1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341,
+     1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341,
+     1341, 1341, 1341, 1341, 1341},
+    {1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341,
+     1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341,
+     1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341, 1341,
+     1341, 1341, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343, 1343,
+     1343, 1343, 1343, 1343, 1343},
+    {1343, 1343, 1343, 1343, 1343, 1343, 1345, 1345, 1347, 1347, 1349, 1349,
+     1351, 1351, 1353, 1353, 1353, 1353, 1355, 1355, 1355, 1355, 1355, 1355,
+     1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355,
+     1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355,
+     1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1355, 1357,
+     1357, 1359, 1359, 1361, 1363, 1363, 1363, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365},
+    {1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365, 1365,
+     1365, 1365, 1365, 1365, 1365, 1365, 1365, 1367, 1369, 1369, 1369, 1369,
+     1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369,
+     1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369, 1369,
+     1369, 1369, 1369, 1369, 1369, 1369, 1369, 1371, 1373, 1373, 1373, 1373,
+     1373, 1373, 1373, 1375, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377,
+     1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377,
+     1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377,
+     1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377,
+     1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377, 1377,
+     1377, 1377, 1377, 1377, 1377, 1381, 1385, 1385, 1385, 1385, 1385, 1385,
+     1385, 1385, 1385, 1385, 1385, 1385, 1385, 1385, 1385, 1385, 1385, 1385,
+     1385, 1385, 1385, 1385, 1385, 1387, 1389, 1389, 1389, 1389, 1389, 1389,
+     1389, 1389, 1389, 1389, 1389, 1389, 1389, 1389, 1389, 1389, 1389, 1389,
+     1389, 1391, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393,
+     1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393,
+     1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393,
+     1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393, 1393,
+     1393, 1393, 1393, 1393, 1393},
+    {1393, 1401, 1409, 1411, 1413, 1415, 1417, 1419, 1421, 1429, 1437, 1439,
+     1441, 1443, 1445, 1447, 1449, 1453, 1457, 1457, 1457, 1457, 1457, 1457,
+     1457, 1461, 1465, 1465, 1465, 1465, 1465, 1465, 1465, 1473, 1481, 1483,
+     1485, 1487, 1489, 1491, 1493, 1501, 1509, 1511, 1513, 1515, 1517, 1519,
+     1521, 1527, 1533, 1533, 1533, 1533, 1533, 1533, 1533, 1539, 1545, 1545,
+     1545, 1545, 1545, 1545, 1545, 1549, 1553, 1553, 1553, 1553, 1553, 1553,
+     1553, 1557, 1561, 1561, 1561, 1561, 1561, 1561, 1561, 1567, 1573, 1573,
+     1573, 1573, 1573, 1573, 1573, 1573, 1579, 1579, 1579, 1579, 1579, 1579,
+     1579, 1587, 1595, 1597, 1599, 1601, 1603, 1605, 1607, 1615, 1623, 1625,
+     1627, 1629, 1631, 1633, 1635, 1637, 1637, 1637, 1637, 1639, 1639, 1639,
+     1639, 1639, 1639, 1639, 1639, 1641, 1641, 1641, 1641, 1641, 1641, 1641,
+     1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641,
+     1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641,
+     1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641,
+     1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641, 1641,
+     1641, 1641, 1641, 1643, 1643, 1643, 1643, 1643, 1643, 1643, 1643, 1643,
+     1649, 1649, 1649, 1649, 1649, 1649, 1649, 1651, 1651, 1651, 1651, 1651,
+     1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651,
+     1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651,
+     1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651, 1651,
+     1651, 1651, 1651, 1651, 1651, 1651, 1651, 1653, 1653, 1653, 1653, 1653,
+     1653, 1653, 1653, 1659, 1659},
+    {1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
+     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
+     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
+     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
+     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
+     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
+     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
+     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
+     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
+     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
+     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
+     1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659, 1659,
+     1659, 1661, 1661, 1663, 1663, 1665, 1665, 1665, 1665, 1665, 1665, 1665,
+     1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665,
+     1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665,
+     1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665,
+     1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665, 1665,
+     1665, 1665, 1665, 1665, 1665, 1667, 1667, 1669, 1669, 1671, 1671, 1671,
+     1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671,
+     1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671,
+     1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671, 1671,
+     1671, 1671, 1671, 1671, 1671},
+    {1671, 1671, 1671, 1671, 1673, 1673, 1673, 1673, 1673, 1675, 1675, 1675,
+     1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677,
+     1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677, 1677,
+     1679, 1679, 1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681,
+     1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681, 1681,
+     1681, 1683, 1683, 1683, 1683, 1683, 1683, 1683, 1685, 1685, 1687, 1687,
+     1687, 1689, 1689, 1689, 1689, 1689, 1691, 1691, 1691, 1691, 1691, 1691,
+     1691, 1691, 1691, 1691, 1691, 1691, 1691, 1691, 1691, 1691, 1691, 1691,
+     1691, 1691, 1693, 1693, 1693, 1695, 1697, 1697, 1697, 1697, 1697, 1697,
+     1697, 1697, 1697, 1697, 1697, 1697, 1697, 1699, 1701, 1701, 1701, 1703,
+     1705, 1705, 1705, 1707, 1709, 1711, 1713, 1713, 1713, 1713, 1713, 1715,
+     1717, 1717, 1717, 1719, 1721, 1721, 1721, 1721, 1721, 1721, 1721, 1721,
+     1721, 1721, 1723, 1725, 1725, 1725, 1725, 1725, 1725, 1725, 1725, 1725,
+     1725, 1725, 1725, 1725, 1725, 1725, 1725, 1727, 1727, 1727, 1727, 1727,
+     1727, 1729, 1731, 1731, 1733, 1733, 1733, 1733, 1733, 1733, 1733, 1735,
+     1737, 1739, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
+     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
+     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
+     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
+     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
+     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
+     1741, 1741, 1741, 1741, 1741},
+    {1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
+     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
+     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
+     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
+     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741,
+     1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1741, 1743,
+     1743, 1743, 1743, 1743, 1745, 1745, 1747, 1747, 1749, 1749, 1751, 1751,
+     1753, 1753, 1755, 1755, 1757, 1757, 1759, 1759, 1761, 1761, 1763, 1763,
+     1765, 1765, 1767, 1767, 1767, 1769, 1769, 1771, 1771, 1773, 1773, 1773,
+     1773, 1773, 1773, 1773, 1777, 1777, 1777, 1781, 1781, 1781, 1785, 1785,
+     1785, 1789, 1789, 1789, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793,
+     1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793,
+     1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793, 1793,
+     1793, 1793, 1795, 1795, 1795, 1795, 1795, 1795, 1795, 1795, 1795, 1797,
+     1797, 1797, 1797, 1797, 1799, 1799, 1801, 1801, 1803, 1803, 1805, 1805,
+     1807, 1807, 1809, 1809, 1811, 1811, 1813, 1813, 1815, 1815, 1817, 1817,
+     1819, 1819, 1821, 1821, 1821, 1823, 1823, 1825, 1825, 1827, 1827, 1827,
+     1827, 1827, 1827, 1827, 1831, 1831, 1831, 1835, 1835, 1835, 1839, 1839,
+     1839, 1843, 1843, 1843, 1847, 1847, 1847, 1847, 1847, 1847, 1847, 1847,
+     1847, 1847, 1847, 1847, 1847, 1847, 1847, 1847, 1847, 1847, 1847, 1847,
+     1849, 1851, 1853, 1855, 1855, 1855, 1855, 1855, 1855, 1855, 1855, 1855,
+     1855, 1855, 1857, 1857, 1857},
+    {1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
+     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
+     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
+     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
+     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
+     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
+     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
+     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
+     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
+     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
+     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
+     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857,
+     1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1857, 1859, 1859,
+     1861, 1861, 1861, 1861, 1861, 1861, 1861, 1861, 1861, 1861, 1863, 1863,
+     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
+     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
+     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
+     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
+     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
+     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
+     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
+     1863, 1863, 1863, 1863, 1863},
+    {1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
+     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
+     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
+     1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863, 1863,
+     1863, 1863, 1865, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867},
+    {1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867, 1867,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871},
+    {1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871, 1871,
+     1871, 1871, 1871, 1871, 1871, 1871, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877},
+    {1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877, 1877,
+     1877, 1877, 1877, 1877, 1877, 1879, 1881, 1881, 1881, 1881, 1881, 1881,
+     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
+     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
+     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
+     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
+     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
+     1881, 1881, 1881, 1881, 1881},
+    {1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
+     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
+     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
+     1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881, 1881,
+     1881, 1881, 1881, 1881, 1881, 1881, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883, 1883,
+     1883, 1883, 1883, 1883, 1883}};
+const char32_t composition_data[1883] = {
+    0,     824,   8814,  824,   8800,  824,   8815,  768,   192,   769,   193,
+    770,   194,   771,   195,   772,   256,   774,   258,   775,   550,   776,
+    196,   777,   7842,  778,   197,   780,   461,   783,   512,   785,   514,
+    803,   7840,  805,   7680,  808,   260,   775,   7682,  803,   7684,  817,
+    7686,  769,   262,   770,   264,   775,   266,   780,   268,   807,   199,
+    775,   7690,  780,   270,   803,   7692,  807,   7696,  813,   7698,  817,
+    7694,  768,   200,   769,   201,   770,   202,   771,   7868,  772,   274,
+    774,   276,   775,   278,   776,   203,   777,   7866,  780,   282,   783,
+    516,   785,   518,   803,   7864,  807,   552,   808,   280,   813,   7704,
+    816,   7706,  775,   7710,  769,   500,   770,   284,   772,   7712,  774,
+    286,   775,   288,   780,   486,   807,   290,   770,   292,   775,   7714,
+    776,   7718,  780,   542,   803,   7716,  807,   7720,  814,   7722,  768,
+    204,   769,   205,   770,   206,   771,   296,   772,   298,   774,   300,
+    775,   304,   776,   207,   777,   7880,  780,   463,   783,   520,   785,
+    522,   803,   7882,  808,   302,   816,   7724,  770,   308,   769,   7728,
+    780,   488,   803,   7730,  807,   310,   817,   7732,  769,   313,   780,
+    317,   803,   7734,  807,   315,   813,   7740,  817,   7738,  769,   7742,
+    775,   7744,  803,   7746,  768,   504,   769,   323,   771,   209,   775,
+    7748,  780,   327,   803,   7750,  807,   325,   813,   7754,  817,   7752,
+    768,   210,   769,   211,   770,   212,   771,   213,   772,   332,   774,
+    334,   775,   558,   776,   214,   777,   7886,  779,   336,   780,   465,
+    783,   524,   785,   526,   795,   416,   803,   7884,  808,   490,   769,
+    7764,  775,   7766,  769,   340,   775,   7768,  780,   344,   783,   528,
+    785,   530,   803,   7770,  807,   342,   817,   7774,  769,   346,   770,
+    348,   775,   7776,  780,   352,   803,   7778,  806,   536,   807,   350,
+    775,   7786,  780,   356,   803,   7788,  806,   538,   807,   354,   813,
+    7792,  817,   7790,  768,   217,   769,   218,   770,   219,   771,   360,
+    772,   362,   774,   364,   776,   220,   777,   7910,  778,   366,   779,
+    368,   780,   467,   783,   532,   785,   534,   795,   431,   803,   7908,
+    804,   7794,  808,   370,   813,   7798,  816,   7796,  771,   7804,  803,
+    7806,  768,   7808,  769,   7810,  770,   372,   775,   7814,  776,   7812,
+    803,   7816,  775,   7818,  776,   7820,  768,   7922,  769,   221,   770,
+    374,   771,   7928,  772,   562,   775,   7822,  776,   376,   777,   7926,
+    803,   7924,  769,   377,   770,   7824,  775,   379,   780,   381,   803,
+    7826,  817,   7828,  768,   224,   769,   225,   770,   226,   771,   227,
+    772,   257,   774,   259,   775,   551,   776,   228,   777,   7843,  778,
+    229,   780,   462,   783,   513,   785,   515,   803,   7841,  805,   7681,
+    808,   261,   775,   7683,  803,   7685,  817,   7687,  769,   263,   770,
+    265,   775,   267,   780,   269,   807,   231,   775,   7691,  780,   271,
+    803,   7693,  807,   7697,  813,   7699,  817,   7695,  768,   232,   769,
+    233,   770,   234,   771,   7869,  772,   275,   774,   277,   775,   279,
+    776,   235,   777,   7867,  780,   283,   783,   517,   785,   519,   803,
+    7865,  807,   553,   808,   281,   813,   7705,  816,   7707,  775,   7711,
+    769,   501,   770,   285,   772,   7713,  774,   287,   775,   289,   780,
+    487,   807,   291,   770,   293,   775,   7715,  776,   7719,  780,   543,
+    803,   7717,  807,   7721,  814,   7723,  817,   7830,  768,   236,   769,
+    237,   770,   238,   771,   297,   772,   299,   774,   301,   776,   239,
+    777,   7881,  780,   464,   783,   521,   785,   523,   803,   7883,  808,
+    303,   816,   7725,  770,   309,   780,   496,   769,   7729,  780,   489,
+    803,   7731,  807,   311,   817,   7733,  769,   314,   780,   318,   803,
+    7735,  807,   316,   813,   7741,  817,   7739,  769,   7743,  775,   7745,
+    803,   7747,  768,   505,   769,   324,   771,   241,   775,   7749,  780,
+    328,   803,   7751,  807,   326,   813,   7755,  817,   7753,  768,   242,
+    769,   243,   770,   244,   771,   245,   772,   333,   774,   335,   775,
+    559,   776,   246,   777,   7887,  779,   337,   780,   466,   783,   525,
+    785,   527,   795,   417,   803,   7885,  808,   491,   769,   7765,  775,
+    7767,  769,   341,   775,   7769,  780,   345,   783,   529,   785,   531,
+    803,   7771,  807,   343,   817,   7775,  769,   347,   770,   349,   775,
+    7777,  780,   353,   803,   7779,  806,   537,   807,   351,   775,   7787,
+    776,   7831,  780,   357,   803,   7789,  806,   539,   807,   355,   813,
+    7793,  817,   7791,  768,   249,   769,   250,   770,   251,   771,   361,
+    772,   363,   774,   365,   776,   252,   777,   7911,  778,   367,   779,
+    369,   780,   468,   783,   533,   785,   535,   795,   432,   803,   7909,
+    804,   7795,  808,   371,   813,   7799,  816,   7797,  771,   7805,  803,
+    7807,  768,   7809,  769,   7811,  770,   373,   775,   7815,  776,   7813,
+    778,   7832,  803,   7817,  775,   7819,  776,   7821,  768,   7923,  769,
+    253,   770,   375,   771,   7929,  772,   563,   775,   7823,  776,   255,
+    777,   7927,  778,   7833,  803,   7925,  769,   378,   770,   7825,  775,
+    380,   780,   382,   803,   7827,  817,   7829,  768,   8173,  769,   901,
+    834,   8129,  768,   7846,  769,   7844,  771,   7850,  777,   7848,  772,
+    478,   769,   506,   769,   508,   772,   482,   769,   7688,  768,   7872,
+    769,   7870,  771,   7876,  777,   7874,  769,   7726,  768,   7890,  769,
+    7888,  771,   7894,  777,   7892,  769,   7756,  772,   556,   776,   7758,
+    772,   554,   769,   510,   768,   475,   769,   471,   772,   469,   780,
+    473,   768,   7847,  769,   7845,  771,   7851,  777,   7849,  772,   479,
+    769,   507,   769,   509,   772,   483,   769,   7689,  768,   7873,  769,
+    7871,  771,   7877,  777,   7875,  769,   7727,  768,   7891,  769,   7889,
+    771,   7895,  777,   7893,  769,   7757,  772,   557,   776,   7759,  772,
+    555,   769,   511,   768,   476,   769,   472,   772,   470,   780,   474,
+    768,   7856,  769,   7854,  771,   7860,  777,   7858,  768,   7857,  769,
+    7855,  771,   7861,  777,   7859,  768,   7700,  769,   7702,  768,   7701,
+    769,   7703,  768,   7760,  769,   7762,  768,   7761,  769,   7763,  775,
+    7780,  775,   7781,  775,   7782,  775,   7783,  769,   7800,  769,   7801,
+    776,   7802,  776,   7803,  775,   7835,  768,   7900,  769,   7898,  771,
+    7904,  777,   7902,  803,   7906,  768,   7901,  769,   7899,  771,   7905,
+    777,   7903,  803,   7907,  768,   7914,  769,   7912,  771,   7918,  777,
+    7916,  803,   7920,  768,   7915,  769,   7913,  771,   7919,  777,   7917,
+    803,   7921,  780,   494,   772,   492,   772,   493,   772,   480,   772,
+    481,   774,   7708,  774,   7709,  772,   560,   772,   561,   780,   495,
+    768,   8122,  769,   902,   772,   8121,  774,   8120,  787,   7944,  788,
+    7945,  837,   8124,  768,   8136,  769,   904,   787,   7960,  788,   7961,
+    768,   8138,  769,   905,   787,   7976,  788,   7977,  837,   8140,  768,
+    8154,  769,   906,   772,   8153,  774,   8152,  776,   938,   787,   7992,
+    788,   7993,  768,   8184,  769,   908,   787,   8008,  788,   8009,  788,
+    8172,  768,   8170,  769,   910,   772,   8169,  774,   8168,  776,   939,
+    788,   8025,  768,   8186,  769,   911,   787,   8040,  788,   8041,  837,
+    8188,  837,   8116,  837,   8132,  768,   8048,  769,   940,   772,   8113,
+    774,   8112,  787,   7936,  788,   7937,  834,   8118,  837,   8115,  768,
+    8050,  769,   941,   787,   7952,  788,   7953,  768,   8052,  769,   942,
+    787,   7968,  788,   7969,  834,   8134,  837,   8131,  768,   8054,  769,
+    943,   772,   8145,  774,   8144,  776,   970,   787,   7984,  788,   7985,
+    834,   8150,  768,   8056,  769,   972,   787,   8000,  788,   8001,  787,
+    8164,  788,   8165,  768,   8058,  769,   973,   772,   8161,  774,   8160,
+    776,   971,   787,   8016,  788,   8017,  834,   8166,  768,   8060,  769,
+    974,   787,   8032,  788,   8033,  834,   8182,  837,   8179,  768,   8146,
+    769,   912,   834,   8151,  768,   8162,  769,   944,   834,   8167,  837,
+    8180,  769,   979,   776,   980,   776,   1031,  774,   1232,  776,   1234,
+    769,   1027,  768,   1024,  774,   1238,  776,   1025,  774,   1217,  776,
+    1244,  776,   1246,  768,   1037,  772,   1250,  774,   1049,  776,   1252,
+    769,   1036,  776,   1254,  772,   1262,  774,   1038,  776,   1264,  779,
+    1266,  776,   1268,  776,   1272,  776,   1260,  774,   1233,  776,   1235,
+    769,   1107,  768,   1104,  774,   1239,  776,   1105,  774,   1218,  776,
+    1245,  776,   1247,  768,   1117,  772,   1251,  774,   1081,  776,   1253,
+    769,   1116,  776,   1255,  772,   1263,  774,   1118,  776,   1265,  779,
+    1267,  776,   1269,  776,   1273,  776,   1261,  776,   1111,  783,   1142,
+    783,   1143,  776,   1242,  776,   1243,  776,   1258,  776,   1259,  1619,
+    1570,  1620,  1571,  1621,  1573,  1620,  1572,  1620,  1574,  1620,  1730,
+    1620,  1747,  1620,  1728,  2364,  2345,  2364,  2353,  2364,  2356,  2494,
+    2507,  2519,  2508,  2878,  2891,  2902,  2888,  2903,  2892,  3031,  2964,
+    3006,  3018,  3031,  3020,  3006,  3019,  3158,  3144,  3285,  3264,  3266,
+    3274,  3285,  3271,  3286,  3272,  3285,  3275,  3390,  3402,  3415,  3404,
+    3390,  3403,  3530,  3546,  3535,  3548,  3551,  3550,  3530,  3549,  4142,
+    4134,  6965,  6918,  6965,  6920,  6965,  6922,  6965,  6924,  6965,  6926,
+    6965,  6930,  6965,  6971,  6965,  6973,  6965,  6976,  6965,  6977,  6965,
+    6979,  772,   7736,  772,   7737,  772,   7772,  772,   7773,  775,   7784,
+    775,   7785,  770,   7852,  774,   7862,  770,   7853,  774,   7863,  770,
+    7878,  770,   7879,  770,   7896,  770,   7897,  768,   7938,  769,   7940,
+    834,   7942,  837,   8064,  768,   7939,  769,   7941,  834,   7943,  837,
+    8065,  837,   8066,  837,   8067,  837,   8068,  837,   8069,  837,   8070,
+    837,   8071,  768,   7946,  769,   7948,  834,   7950,  837,   8072,  768,
+    7947,  769,   7949,  834,   7951,  837,   8073,  837,   8074,  837,   8075,
+    837,   8076,  837,   8077,  837,   8078,  837,   8079,  768,   7954,  769,
+    7956,  768,   7955,  769,   7957,  768,   7962,  769,   7964,  768,   7963,
+    769,   7965,  768,   7970,  769,   7972,  834,   7974,  837,   8080,  768,
+    7971,  769,   7973,  834,   7975,  837,   8081,  837,   8082,  837,   8083,
+    837,   8084,  837,   8085,  837,   8086,  837,   8087,  768,   7978,  769,
+    7980,  834,   7982,  837,   8088,  768,   7979,  769,   7981,  834,   7983,
+    837,   8089,  837,   8090,  837,   8091,  837,   8092,  837,   8093,  837,
+    8094,  837,   8095,  768,   7986,  769,   7988,  834,   7990,  768,   7987,
+    769,   7989,  834,   7991,  768,   7994,  769,   7996,  834,   7998,  768,
+    7995,  769,   7997,  834,   7999,  768,   8002,  769,   8004,  768,   8003,
+    769,   8005,  768,   8010,  769,   8012,  768,   8011,  769,   8013,  768,
+    8018,  769,   8020,  834,   8022,  768,   8019,  769,   8021,  834,   8023,
+    768,   8027,  769,   8029,  834,   8031,  768,   8034,  769,   8036,  834,
+    8038,  837,   8096,  768,   8035,  769,   8037,  834,   8039,  837,   8097,
+    837,   8098,  837,   8099,  837,   8100,  837,   8101,  837,   8102,  837,
+    8103,  768,   8042,  769,   8044,  834,   8046,  837,   8104,  768,   8043,
+    769,   8045,  834,   8047,  837,   8105,  837,   8106,  837,   8107,  837,
+    8108,  837,   8109,  837,   8110,  837,   8111,  837,   8114,  837,   8130,
+    837,   8178,  837,   8119,  768,   8141,  769,   8142,  834,   8143,  837,
+    8135,  837,   8183,  768,   8157,  769,   8158,  834,   8159,  824,   8602,
+    824,   8603,  824,   8622,  824,   8653,  824,   8655,  824,   8654,  824,
+    8708,  824,   8713,  824,   8716,  824,   8740,  824,   8742,  824,   8769,
+    824,   8772,  824,   8775,  824,   8777,  824,   8813,  824,   8802,  824,
+    8816,  824,   8817,  824,   8820,  824,   8821,  824,   8824,  824,   8825,
+    824,   8832,  824,   8833,  824,   8928,  824,   8929,  824,   8836,  824,
+    8837,  824,   8840,  824,   8841,  824,   8930,  824,   8931,  824,   8876,
+    824,   8877,  824,   8878,  824,   8879,  824,   8938,  824,   8939,  824,
+    8940,  824,   8941,  12441, 12436, 12441, 12364, 12441, 12366, 12441, 12368,
+    12441, 12370, 12441, 12372, 12441, 12374, 12441, 12376, 12441, 12378, 12441,
+    12380, 12441, 12382, 12441, 12384, 12441, 12386, 12441, 12389, 12441, 12391,
+    12441, 12393, 12441, 12400, 12442, 12401, 12441, 12403, 12442, 12404, 12441,
+    12406, 12442, 12407, 12441, 12409, 12442, 12410, 12441, 12412, 12442, 12413,
+    12441, 12446, 12441, 12532, 12441, 12460, 12441, 12462, 12441, 12464, 12441,
+    12466, 12441, 12468, 12441, 12470, 12441, 12472, 12441, 12474, 12441, 12476,
+    12441, 12478, 12441, 12480, 12441, 12482, 12441, 12485, 12441, 12487, 12441,
+    12489, 12441, 12496, 12442, 12497, 12441, 12499, 12442, 12500, 12441, 12502,
+    12442, 12503, 12441, 12505, 12442, 12506, 12441, 12508, 12442, 12509, 12441,
+    12535, 12441, 12536, 12441, 12537, 12441, 12538, 12441, 12542, 69818, 69786,
+    69818, 69788, 69818, 69803, 69927, 69934, 69927, 69935, 70462, 70475, 70487,
+    70476, 70832, 70844, 70842, 70843, 70845, 70846, 71087, 71098, 71087, 71099,
+    71984, 71992};
+
+}  // namespace ada::idna
+#endif  // ADA_IDNA_NORMALIZATION_TABLES_H
+/* end file src/normalization_tables.cpp */
 
 namespace ada::idna {
 
+// See
+// https://github.com/uni-algo/uni-algo/blob/c612968c5ed3ace39bde4c894c24286c5f2c7fe2/include/uni_algo/impl/impl_norm.h#L467
+constexpr char32_t hangul_sbase = 0xAC00;
+constexpr char32_t hangul_tbase = 0x11A7;
+constexpr char32_t hangul_vbase = 0x1161;
+constexpr char32_t hangul_lbase = 0x1100;
+constexpr char32_t hangul_lcount = 19;
+constexpr char32_t hangul_vcount = 21;
+constexpr char32_t hangul_tcount = 28;
+constexpr char32_t hangul_ncount = hangul_vcount * hangul_tcount;
+constexpr char32_t hangul_scount =
+    hangul_lcount * hangul_vcount * hangul_tcount;
+
+std::pair<bool, size_t> compute_decomposition_length(
+    const std::u32string_view input) noexcept {
+  bool decomposition_needed{false};
+  size_t additional_elements{0};
+  for (char32_t current_character : input) {
+    size_t decomposition_length{0};
+
+    if (current_character >= hangul_sbase &&
+        current_character < hangul_sbase + hangul_scount) {
+      decomposition_length = 2;
+      if ((current_character - hangul_sbase) % hangul_tcount) {
+        decomposition_length = 3;
+      }
+    } else if (current_character < 0x110000) {
+      const uint8_t di = decomposition_index[current_character >> 8];
+      const uint16_t* const decomposition =
+          decomposition_block[di] + (current_character % 256);
+      decomposition_length = (decomposition[1] >> 2) - (decomposition[0] >> 2);
+      if ((decomposition_length > 0) && (decomposition[0] & 1)) {
+        decomposition_length = 0;
+      }
+    }
+    if (decomposition_length != 0) {
+      decomposition_needed = true;
+      additional_elements += decomposition_length - 1;
+    }
+  }
+  return {decomposition_needed, additional_elements};
+}
+
+void decompose(std::u32string& input, size_t additional_elements) {
+  input.resize(input.size() + additional_elements);
+  for (size_t descending_idx = input.size(),
+              input_count = descending_idx - additional_elements;
+       input_count--;) {
+    if (input[input_count] >= hangul_sbase &&
+        input[input_count] < hangul_sbase + hangul_scount) {
+      // Hangul decomposition.
+      char32_t s_index = input[input_count] - hangul_sbase;
+      if (s_index % hangul_tcount != 0) {
+        input[--descending_idx] = hangul_tbase + s_index % hangul_tcount;
+      }
+      input[--descending_idx] =
+          hangul_vbase + (s_index % hangul_ncount) / hangul_tcount;
+      input[--descending_idx] = hangul_lbase + s_index / hangul_ncount;
+    } else if (input[input_count] < 0x110000) {
+      // Check decomposition_data.
+      const uint16_t* decomposition =
+          decomposition_block[decomposition_index[input[input_count] >> 8]] +
+          (input[input_count] % 256);
+      uint16_t decomposition_length =
+          (decomposition[1] >> 2) - (decomposition[0] >> 2);
+      if (decomposition_length > 0 && (decomposition[0] & 1)) {
+        decomposition_length = 0;
+      }
+      if (decomposition_length > 0) {
+        // Non-recursive decomposition.
+        while (decomposition_length-- > 0) {
+          input[--descending_idx] = decomposition_data[(decomposition[0] >> 2) +
+                                                       decomposition_length];
+        }
+      } else {
+        // No decomposition.
+        input[--descending_idx] = input[input_count];
+      }
+    } else {
+      // Non-Unicode character.
+      input[--descending_idx] = input[input_count];
+    }
+  }
+}
+
+uint8_t get_ccc(char32_t c) noexcept {
+  return c < 0x110000 ? canonical_combining_class_block
+                            [canonical_combining_class_index[c >> 8]][c % 256]
+                      : 0;
+}
+
+void sort_marks(std::u32string& input) {
+  for (size_t idx = 1; idx < input.size(); idx++) {
+    uint8_t ccc = get_ccc(input[idx]);
+    if (ccc == 0) {
+      continue;
+    }  // Skip non-combining characters.
+    auto current_character = input[idx];
+    size_t back_idx = idx;
+    while (back_idx != 0 && get_ccc(input[back_idx - 1]) > ccc) {
+      input[back_idx] = input[back_idx - 1];
+      back_idx--;
+    }
+    input[back_idx] = current_character;
+  }
+}
+
+void decompose_nfc(std::u32string& input) {
+  /**
+   * Decompose the domain_name string to Unicode Normalization Form C.
+   * @see https://www.unicode.org/reports/tr46/#ProcessingStepDecompose
+   */
+  auto [decomposition_needed, additional_elements] =
+      compute_decomposition_length(input);
+  if (decomposition_needed) {
+    decompose(input, additional_elements);
+  }
+  sort_marks(input);
+}
+
+void compose(std::u32string& input) {
+  /**
+   * Compose the domain_name string to Unicode Normalization Form C.
+   * @see https://www.unicode.org/reports/tr46/#ProcessingStepCompose
+   */
+  size_t input_count{0};
+  size_t composition_count{0};
+  for (; input_count < input.size(); input_count++, composition_count++) {
+    input[composition_count] = input[input_count];
+    if (input[input_count] >= hangul_lbase &&
+        input[input_count] < hangul_lbase + hangul_lcount) {
+      if (input_count + 1 < input.size() &&
+          input[input_count + 1] >= hangul_vbase &&
+          input[input_count + 1] < hangul_vbase + hangul_vcount) {
+        input[composition_count] =
+            hangul_sbase +
+            ((input[input_count] - hangul_lbase) * hangul_vcount +
+             input[input_count + 1] - hangul_vbase) *
+                hangul_tcount;
+        input_count++;
+        if (input_count + 1 < input.size() &&
+            input[input_count + 1] > hangul_tbase &&
+            input[input_count + 1] < hangul_tbase + hangul_tcount) {
+          input[composition_count] += input[++input_count] - hangul_tbase;
+        }
+      }
+    } else if (input[input_count] >= hangul_sbase &&
+               input[input_count] < hangul_sbase + hangul_scount) {
+      if ((input[input_count] - hangul_sbase) % hangul_tcount &&
+          input_count + 1 < input.size() &&
+          input[input_count + 1] > hangul_tbase &&
+          input[input_count + 1] < hangul_tbase + hangul_tcount) {
+        input[composition_count] += input[++input_count] - hangul_tbase;
+      }
+    } else if (input[input_count] < 0x110000) {
+      const uint16_t* composition =
+          &composition_block[composition_index[input[input_count] >> 8]]
+                            [input[input_count] % 256];
+      size_t initial_composition_count = composition_count;
+      for (int32_t previous_ccc = -1; input_count + 1 < input.size();
+           input_count++) {
+        uint8_t ccc = get_ccc(input[input_count + 1]);
+
+        if (composition[1] != composition[0] && previous_ccc < ccc) {
+          // Try finding a composition.
+          uint16_t left = composition[0];
+          uint16_t right = composition[1];
+          while (left + 2 < right) {
+            // mean without overflow
+            uint16_t middle = left + (((right - left) >> 1) & ~1);
+            if (composition_data[middle] <= input[input_count + 1]) {
+              left = middle;
+            }
+            if (composition_data[middle] >= input[input_count + 1]) {
+              right = middle;
+            }
+          }
+          if (composition_data[left] == input[input_count + 1]) {
+            input[initial_composition_count] = composition_data[left + 1];
+            composition =
+                &composition_block
+                    [composition_index[composition_data[left + 1] >> 8]]
+                    [composition_data[left + 1] % 256];
+            continue;
+          }
+        }
+
+        if (ccc == 0) {
+          break;
+        }  // Not a combining character.
+        previous_ccc = ccc;
+        input[++composition_count] = input[input_count + 1];
+      }
+    }
+  }
+
+  if (composition_count < input_count) {
+    input.resize(composition_count);
+  }
+}
+
 void normalize(std::u32string& input) {
-  //    [Normalize](https://www.unicode.org/reports/tr46/#ProcessingStepNormalize).
-  //    Normalize
-  //     the domain_name string to Unicode Normalization Form C.
-  ufal::unilib::uninorms::nfc(input);
+  /**
+   * Normalize the domain_name string to Unicode Normalization Form C.
+   * @see https://www.unicode.org/reports/tr46/#ProcessingStepNormalize
+   */
+  decompose_nfc(input);
+  compose(input);
 }
 
 }  // namespace ada::idna
@@ -8229,7 +8166,6 @@ bool utf32_to_punycode(std::u32string_view input, std::string &out) {
 }  // namespace ada::idna
 /* end file src/punycode.cpp */
 /* begin file src/validity.cpp */
-
 #include <algorithm>
 #include <string_view>
 
@@ -9360,7 +9296,7 @@ bool is_label_valid(const std::u32string_view label) {
   // - For Nontransitional Processing, each value must be either valid or
   // deviation.
 
-  // If CheckJoiners, the label must satisify the ContextJ rules from Appendix
+  // If CheckJoiners, the label must satisfy the ContextJ rules from Appendix
   // A, in The Unicode Code Points and Internationalized Domain Names for
   // Applications (IDNA) [IDNA2008].
   constexpr static uint32_t virama[] = {
@@ -9569,19 +9505,20 @@ bool is_label_valid(const std::u32string_view label) {
 
 namespace ada::idna {
 
-bool constexpr begins_with(std::u32string_view view,
-                           std::u32string_view prefix) {
+bool begins_with(std::u32string_view view, std::u32string_view prefix) {
   if (view.size() < prefix.size()) {
     return false;
   }
-  return view.substr(0, prefix.size()) == prefix;
+  // constexpr as of C++20
+  return std::equal(prefix.begin(), prefix.end(), view.begin());
 }
 
-bool constexpr begins_with(std::string_view view, std::string_view prefix) {
+bool begins_with(std::string_view view, std::string_view prefix) {
   if (view.size() < prefix.size()) {
     return false;
   }
-  return view.substr(0, prefix.size()) == prefix;
+  // constexpr as of C++20
+  return std::equal(prefix.begin(), prefix.end(), view.begin());
 }
 
 bool constexpr is_ascii(std::u32string_view view) {
@@ -9617,18 +9554,18 @@ constexpr static uint8_t is_forbidden_domain_code_point_table[] = {
 
 static_assert(sizeof(is_forbidden_domain_code_point_table) == 256);
 
-inline constexpr bool is_forbidden_domain_code_point(const char c) noexcept {
+inline bool is_forbidden_domain_code_point(const char c) noexcept {
   return is_forbidden_domain_code_point_table[uint8_t(c)];
 }
 
-// We return "" on error. For now.
-std::string from_ascii_to_ascii(std::string_view ut8_string) {
-  static const std::string error = "";
-  if (std::any_of(ut8_string.begin(), ut8_string.end(),
-                  is_forbidden_domain_code_point)) {
-    return error;
-  }
+bool contains_forbidden_domain_code_point(std::string_view view) {
+  return (
+      std::any_of(view.begin(), view.end(), is_forbidden_domain_code_point));
+}
 
+// We return "" on error.
+static std::string from_ascii_to_ascii(std::string_view ut8_string) {
+  static const std::string error = "";
   // copy and map
   // we could be more efficient by avoiding the copy when unnecessary.
   std::string mapped_string = std::string(ut8_string);
@@ -9682,7 +9619,7 @@ std::string from_ascii_to_ascii(std::string_view ut8_string) {
   return out;
 }
 
-// We return "" on error. For now.
+// We return "" on error.
 std::string to_ascii(std::string_view ut8_string) {
   if (is_ascii(ut8_string)) {
     return from_ascii_to_ascii(ut8_string);
@@ -9769,11 +9706,6 @@ std::string to_ascii(std::string_view ut8_string) {
       out.push_back('.');
     }
   }
-
-  if (std::any_of(out.begin(), out.end(), is_forbidden_domain_code_point)) {
-    return error;
-  }
-
   return out;
 }
 }  // namespace ada::idna
@@ -9838,14 +9770,22 @@ std::string to_unicode(std::string_view input) {
 ADA_POP_DISABLE_WARNINGS
 
 #include <algorithm>
+#if ADA_NEON
+#include <arm_neon.h>
+#elif ADA_SSE2
+#include <emmintrin.h>
+#endif
 
 namespace ada::unicode {
 
+constexpr uint64_t broadcast(uint8_t v) noexcept {
+  return 0x101010101010101ull * v;
+}
+
 constexpr bool to_lower_ascii(char* input, size_t length) noexcept {
-  auto broadcast = [](uint8_t v) -> uint64_t { return 0x101010101010101 * v; };
   uint64_t broadcast_80 = broadcast(0x80);
   uint64_t broadcast_Ap = broadcast(128 - 'A');
-  uint64_t broadcast_Zp = broadcast(128 - 'Z');
+  uint64_t broadcast_Zp = broadcast(128 - 'Z' - 1);
   uint64_t non_ascii = 0;
   size_t i = 0;
 
@@ -9867,13 +9807,82 @@ constexpr bool to_lower_ascii(char* input, size_t length) noexcept {
   }
   return non_ascii == 0;
 }
-
-ada_really_inline constexpr bool has_tabs_or_newline(
+#if ADA_NEON
+ada_really_inline bool has_tabs_or_newline(
+    std::string_view user_input) noexcept {
+  // first check for short strings in which case we do it naively.
+  if (user_input.size() < 16) {  // slow path
+    for (size_t i = 0; i < user_input.size(); i++) {
+      if (user_input[i] == '\r' || user_input[i] == '\n' ||
+          user_input[i] == '\t') {
+        return true;
+      }
+    }
+    return false;
+  }
+  // fast path for long strings (expected to be common)
+  size_t i = 0;
+  const uint8x16_t mask1 = vmovq_n_u8('\r');
+  const uint8x16_t mask2 = vmovq_n_u8('\n');
+  const uint8x16_t mask3 = vmovq_n_u8('\t');
+  uint8x16_t running{0};
+  for (; i + 15 < user_input.size(); i += 16) {
+    uint8x16_t word = vld1q_u8((const uint8_t*)user_input.data() + i);
+    running = vorrq_u8(vorrq_u8(running, vorrq_u8(vceqq_u8(word, mask1),
+                                                  vceqq_u8(word, mask2))),
+                       vceqq_u8(word, mask3));
+  }
+  if (i < user_input.size()) {
+    uint8x16_t word =
+        vld1q_u8((const uint8_t*)user_input.data() + user_input.length() - 16);
+    running = vorrq_u8(vorrq_u8(running, vorrq_u8(vceqq_u8(word, mask1),
+                                                  vceqq_u8(word, mask2))),
+                       vceqq_u8(word, mask3));
+  }
+  return vmaxvq_u8(running) != 0;
+}
+#elif ADA_SSE2
+ada_really_inline bool has_tabs_or_newline(
+    std::string_view user_input) noexcept {
+  // first check for short strings in which case we do it naively.
+  if (user_input.size() < 16) {  // slow path
+    for (size_t i = 0; i < user_input.size(); i++) {
+      if (user_input[i] == '\r' || user_input[i] == '\n' ||
+          user_input[i] == '\t') {
+        return true;
+      }
+    }
+    return false;
+  }
+  // fast path for long strings (expected to be common)
+  size_t i = 0;
+  const __m128i mask1 = _mm_set1_epi8('\r');
+  const __m128i mask2 = _mm_set1_epi8('\n');
+  const __m128i mask3 = _mm_set1_epi8('\t');
+  __m128i running{0};
+  for (; i + 15 < user_input.size(); i += 16) {
+    __m128i word = _mm_loadu_si128((const __m128i*)(user_input.data() + i));
+    running = _mm_or_si128(
+        _mm_or_si128(running, _mm_or_si128(_mm_cmpeq_epi8(word, mask1),
+                                           _mm_cmpeq_epi8(word, mask2))),
+        _mm_cmpeq_epi8(word, mask3));
+  }
+  if (i < user_input.size()) {
+    __m128i word = _mm_loadu_si128(
+        (const __m128i*)(user_input.data() + user_input.length() - 16));
+    running = _mm_or_si128(
+        _mm_or_si128(running, _mm_or_si128(_mm_cmpeq_epi8(word, mask1),
+                                           _mm_cmpeq_epi8(word, mask2))),
+        _mm_cmpeq_epi8(word, mask3));
+  }
+  return _mm_movemask_epi8(running) != 0;
+}
+#else
+ada_really_inline bool has_tabs_or_newline(
     std::string_view user_input) noexcept {
   auto has_zero_byte = [](uint64_t v) {
     return ((v - 0x0101010101010101) & ~(v)&0x8080808080808080);
   };
-  auto broadcast = [](uint8_t v) -> uint64_t { return 0x101010101010101 * v; };
   size_t i = 0;
   uint64_t mask1 = broadcast('\r');
   uint64_t mask2 = broadcast('\n');
@@ -9897,6 +9906,7 @@ ada_really_inline constexpr bool has_tabs_or_newline(
   }
   return running;
 }
+#endif
 
 // A forbidden host code point is U+0000 NULL, U+0009 TAB, U+000A LF, U+000D CR,
 // U+0020 SPACE, U+0023 (#), U+002F (/), U+003A (:), U+003C (<), U+003E (>),
@@ -9961,7 +9971,7 @@ ada_really_inline constexpr bool is_forbidden_domain_code_point(
 }
 
 ada_really_inline constexpr bool contains_forbidden_domain_code_point(
-    char* input, size_t length) noexcept {
+    const char* input, size_t length) noexcept {
   size_t i = 0;
   uint8_t accumulator{};
   for (; i + 4 <= length; i += 4) {
@@ -9972,6 +9982,45 @@ ada_really_inline constexpr bool contains_forbidden_domain_code_point(
   }
   for (; i < length; i++) {
     accumulator |= is_forbidden_domain_code_point_table[uint8_t(input[i])];
+  }
+  return accumulator;
+}
+
+constexpr static uint8_t is_forbidden_domain_code_point_table_or_upper[] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2,
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+
+static_assert(sizeof(is_forbidden_domain_code_point_table_or_upper) == 256);
+static_assert(is_forbidden_domain_code_point_table_or_upper[uint8_t('A')] == 2);
+static_assert(is_forbidden_domain_code_point_table_or_upper[uint8_t('Z')] == 2);
+
+ada_really_inline constexpr uint8_t
+contains_forbidden_domain_code_point_or_upper(const char* input,
+                                              size_t length) noexcept {
+  size_t i = 0;
+  uint8_t accumulator{};
+  for (; i + 4 <= length; i += 4) {
+    accumulator |=
+        is_forbidden_domain_code_point_table_or_upper[uint8_t(input[i])];
+    accumulator |=
+        is_forbidden_domain_code_point_table_or_upper[uint8_t(input[i + 1])];
+    accumulator |=
+        is_forbidden_domain_code_point_table_or_upper[uint8_t(input[i + 2])];
+    accumulator |=
+        is_forbidden_domain_code_point_table_or_upper[uint8_t(input[i + 3])];
+  }
+  for (; i < length; i++) {
+    accumulator |=
+        is_forbidden_domain_code_point_table_or_upper[uint8_t(input[i])];
   }
   return accumulator;
 }
@@ -10101,13 +10150,12 @@ ada_really_inline constexpr bool is_lowercase_hex(const char c) noexcept {
   return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
 }
 
+constexpr static char hex_to_binary_table[] = {
+    0,  1,  2,  3,  4, 5, 6, 7, 8, 9, 0, 0,  0,  0,  0,  0,  0, 10, 11,
+    12, 13, 14, 15, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0, 0,  0,
+    0,  0,  0,  0,  0, 0, 0, 0, 0, 0, 0, 10, 11, 12, 13, 14, 15};
 unsigned constexpr convert_hex_to_binary(const char c) noexcept {
-  // this code can be optimized.
-  if (c <= '9') {
-    return c - '0';
-  }
-  char del = c >= 'a' ? 'a' : 'A';
-  return 10 + (c - del);
+  return hex_to_binary_table[c - '0'];
 }
 
 std::string percent_decode(const std::string_view input, size_t first_percent) {
@@ -10116,8 +10164,9 @@ std::string percent_decode(const std::string_view input, size_t first_percent) {
   if (first_percent == std::string_view::npos) {
     return std::string(input);
   }
-  std::string dest(input.substr(0, first_percent));
+  std::string dest;
   dest.reserve(input.length());
+  dest.append(input.substr(0, first_percent));
   const char* pointer = input.data() + first_percent;
   const char* end = input.data() + input.size();
   // Optimization opportunity: if the following code gets
@@ -10154,9 +10203,10 @@ std::string percent_encode(const std::string_view input,
     return std::string(input);
   }
 
-  std::string result(input.substr(0, std::distance(input.begin(), pointer)));
+  std::string result;
   result.reserve(input.length());  // in the worst case, percent encoding might
                                    // produce 3 characters.
+  result.append(input.substr(0, std::distance(input.begin(), pointer)));
 
   for (; pointer != input.end(); pointer++) {
     if (character_sets::bit_at(character_set, *pointer)) {
@@ -10214,7 +10264,8 @@ bool to_ascii(std::optional<std::string>& out, const std::string_view plain,
   }
   // input is a non-empty UTF-8 string, must be percent decoded
   std::string idna_ascii = ada::idna::to_ascii(input);
-  if (idna_ascii.empty()) {
+  if (idna_ascii.empty() || contains_forbidden_domain_code_point(
+                                idna_ascii.data(), idna_ascii.size())) {
     return false;
   }
   out = std::move(idna_ascii);
@@ -10367,6 +10418,19 @@ std::string href_from_file(std::string_view input) {
   return "file://" + path;
 }
 
+bool can_parse(std::string_view input, const std::string_view* base_input) {
+  ada::result<ada::url_aggregator> base;
+  ada::url_aggregator* base_pointer = nullptr;
+  if (base_input != nullptr) {
+    base = ada::parse<url_aggregator>(*base_input);
+    if (!base) {
+      return false;
+    }
+    base_pointer = &base.value();
+  }
+  return ada::parse<url_aggregator>(input, base_pointer).has_value();
+}
+
 ada_warn_unused std::string to_string(ada::encoding_type type) {
   switch (type) {
     case ada::encoding_type::UTF8:
@@ -10463,7 +10527,7 @@ ada_unused std::string get_state(ada::state s) {
   }
 }
 
-ada_really_inline std::optional<std::string_view> prune_fragment(
+ada_really_inline std::optional<std::string_view> prune_hash(
     std::string_view& input) noexcept {
   // compiles down to 20--30 instructions including a class to memchr (C
   // function). this function should be quite fast.
@@ -10471,30 +10535,31 @@ ada_really_inline std::optional<std::string_view> prune_fragment(
   if (location_of_first == std::string_view::npos) {
     return std::nullopt;
   }
-  std::string_view fragment = input;
-  fragment.remove_prefix(location_of_first + 1);
+  std::string_view hash = input;
+  hash.remove_prefix(location_of_first + 1);
   input.remove_suffix(input.size() - location_of_first);
-  return fragment;
+  return hash;
 }
 
 ada_really_inline bool shorten_path(std::string& path,
                                     ada::scheme::type type) noexcept {
   size_t first_delimiter = path.find_first_of('/', 1);
 
-  // Let path be url’s path.
-  // If url’s scheme is "file", path’s size is 1, and path[0] is a normalized
+  // Let path be url's path.
+  // If url's scheme is "file", path's size is 1, and path[0] is a normalized
   // Windows drive letter, then return.
   if (type == ada::scheme::type::FILE &&
-      first_delimiter == std::string_view::npos) {
+      first_delimiter == std::string_view::npos && !path.empty()) {
     if (checkers::is_normalized_windows_drive_letter(
-            std::string_view(path.data() + 1, first_delimiter - 1))) {
+            helpers::substring(path, 1))) {
       return false;
     }
   }
 
-  // Remove path’s last item, if any.
-  if (!path.empty()) {
-    path.erase(path.rfind('/'));
+  // Remove path's last item, if any.
+  size_t last_delimiter = path.rfind('/');
+  if (last_delimiter != std::string::npos) {
+    path.erase(last_delimiter);
     return true;
   }
 
@@ -10505,24 +10570,24 @@ ada_really_inline bool shorten_path(std::string_view& path,
                                     ada::scheme::type type) noexcept {
   size_t first_delimiter = path.find_first_of('/', 1);
 
-  // Let path be url’s path.
-  // If url’s scheme is "file", path’s size is 1, and path[0] is a normalized
+  // Let path be url's path.
+  // If url's scheme is "file", path's size is 1, and path[0] is a normalized
   // Windows drive letter, then return.
   if (type == ada::scheme::type::FILE &&
-      first_delimiter == std::string_view::npos) {
+      first_delimiter == std::string_view::npos && !path.empty()) {
     if (checkers::is_normalized_windows_drive_letter(
-            std::string_view(path.data() + 1, first_delimiter - 1))) {
+            helpers::substring(path, 1))) {
       return false;
     }
   }
 
-  // Remove path’s last item, if any.
+  // Remove path's last item, if any.
   if (!path.empty()) {
     size_t slash_loc = path.rfind('/');
     if (slash_loc != std::string_view::npos) {
       path.remove_suffix(path.size() - slash_loc);
+      return true;
     }
-    return true;
   }
 
   return false;
@@ -10542,7 +10607,7 @@ ada_really_inline void remove_ascii_tab_or_newline(
 ada_really_inline std::string_view substring(std::string_view input,
                                              size_t pos) noexcept {
   ADA_ASSERT_TRUE(pos <= input.size());
-  // The following is safer but uneeded if we have the above line:
+  // The following is safer but unneeded if we have the above line:
   // return pos > input.size() ? std::string_view() : input.substr(pos);
   return input.substr(pos);
 }
@@ -10589,7 +10654,9 @@ ada_really_inline size_t find_next_host_delimiter_special(
   auto index_of_first_set_byte = [](uint64_t v) {
     return ((((v - 1) & 0x101010101010101) * 0x101010101010101) >> 56) - 1;
   };
-  auto broadcast = [](uint8_t v) -> uint64_t { return 0x101010101010101 * v; };
+  auto broadcast = [](uint8_t v) -> uint64_t {
+    return 0x101010101010101ull * v;
+  };
   size_t i = location;
   uint64_t mask1 = broadcast(':');
   uint64_t mask2 = broadcast('/');
@@ -10614,7 +10681,7 @@ ada_really_inline size_t find_next_host_delimiter_special(
                         has_zero_byte(xor3) | has_zero_byte(xor4) |
                         has_zero_byte(xor5);
     if (is_match) {
-      return i + index_of_first_set_byte(is_match);
+      return size_t(i + index_of_first_set_byte(is_match));
     }
   }
   if (i < view.size()) {
@@ -10632,7 +10699,7 @@ ada_really_inline size_t find_next_host_delimiter_special(
                         has_zero_byte(xor3) | has_zero_byte(xor4) |
                         has_zero_byte(xor5);
     if (is_match) {
-      return i + index_of_first_set_byte(is_match);
+      return size_t(i + index_of_first_set_byte(is_match));
     }
   }
   return view.size();
@@ -10652,7 +10719,9 @@ ada_really_inline size_t find_next_host_delimiter(std::string_view view,
   auto index_of_first_set_byte = [](uint64_t v) {
     return ((((v - 1) & 0x101010101010101) * 0x101010101010101) >> 56) - 1;
   };
-  auto broadcast = [](uint8_t v) -> uint64_t { return 0x101010101010101 * v; };
+  auto broadcast = [](uint8_t v) -> uint64_t {
+    return 0x101010101010101ull * v;
+  };
   size_t i = location;
   uint64_t mask1 = broadcast(':');
   uint64_t mask2 = broadcast('/');
@@ -10674,7 +10743,7 @@ ada_really_inline size_t find_next_host_delimiter(std::string_view view,
     uint64_t is_match = has_zero_byte(xor1) | has_zero_byte(xor2) |
                         has_zero_byte(xor4) | has_zero_byte(xor5);
     if (is_match) {
-      return i + index_of_first_set_byte(is_match);
+      return size_t(i + index_of_first_set_byte(is_match));
     }
   }
   if (i < view.size()) {
@@ -10692,7 +10761,7 @@ ada_really_inline size_t find_next_host_delimiter(std::string_view view,
     uint64_t is_match = has_zero_byte(xor1) | has_zero_byte(xor2) |
                         has_zero_byte(xor4) | has_zero_byte(xor5);
     if (is_match) {
-      return i + index_of_first_set_byte(is_match);
+      return size_t(i + index_of_first_set_byte(is_match));
     }
   }
   return view.size();
@@ -10882,8 +10951,9 @@ ada_really_inline void parse_prepared_path(std::string_view input,
             input.substr(previous_location, new_location - previous_location);
         previous_location = new_location + 1;
         if (path_view == "..") {
-          if (!path.empty()) {
-            path.erase(path.rfind('/'));
+          size_t last_delimiter = path.rfind('/');
+          if (last_delimiter != std::string::npos) {
+            path.erase(last_delimiter);
           }
         } else if (path_view != ".") {
           path += '/';
@@ -10914,8 +10984,8 @@ ada_really_inline void parse_prepared_path(std::string_view input,
               ? path_buffer_tmp
               : path_view;
       if (unicode::is_double_dot_path_segment(path_buffer)) {
-        helpers::shorten_path(path, type);
-        if (location == std::string_view::npos) {
+        if ((helpers::shorten_path(path, type) || special) &&
+            location == std::string_view::npos) {
           path += '/';
         }
       } else if (unicode::is_single_dot_path_segment(path_buffer) &&
@@ -10924,7 +10994,7 @@ ada_really_inline void parse_prepared_path(std::string_view input,
       }
       // Otherwise, if path_buffer is not a single-dot path segment, then:
       else if (!unicode::is_single_dot_path_segment(path_buffer)) {
-        // If url’s scheme is "file", url’s path is empty, and path_buffer is a
+        // If url's scheme is "file", url's path is empty, and path_buffer is a
         // Windows drive letter, then replace the second code point in
         // path_buffer with U+003A (:).
         if (type == ada::scheme::type::FILE && path.empty() &&
@@ -10935,7 +11005,7 @@ ada_really_inline void parse_prepared_path(std::string_view input,
           path_buffer.remove_prefix(2);
           path.append(path_buffer);
         } else {
-          // Append path_buffer to url’s path.
+          // Append path_buffer to url's path.
           path += '/';
           path.append(path_buffer);
         }
@@ -10960,8 +11030,8 @@ ada_really_inline void strip_trailing_spaces_from_opaque_path(
     url_type& url) noexcept {
   ada_log("helpers::strip_trailing_spaces_from_opaque_path");
   if (!url.has_opaque_path) return;
-  if (url.base_fragment_has_value()) return;
-  if (url.base_search_has_value()) return;
+  if (url.has_hash()) return;
+  if (url.has_search()) return;
 
   auto path = std::string(url.get_pathname());
   while (!path.empty() && path.back() == ' ') {
@@ -10978,7 +11048,9 @@ find_authority_delimiter_special(std::string_view view) noexcept {
   auto index_of_first_set_byte = [](uint64_t v) {
     return ((((v - 1) & 0x101010101010101) * 0x101010101010101) >> 56) - 1;
   };
-  auto broadcast = [](uint8_t v) -> uint64_t { return 0x101010101010101 * v; };
+  auto broadcast = [](uint8_t v) -> uint64_t {
+    return 0x101010101010101ull * v;
+  };
   size_t i = 0;
   uint64_t mask1 = broadcast('@');
   uint64_t mask2 = broadcast('/');
@@ -10996,7 +11068,7 @@ find_authority_delimiter_special(std::string_view view) noexcept {
     uint64_t is_match = has_zero_byte(xor1) | has_zero_byte(xor2) |
                         has_zero_byte(xor3) | has_zero_byte(xor4);
     if (is_match) {
-      return i + index_of_first_set_byte(is_match);
+      return size_t(i + index_of_first_set_byte(is_match));
     }
   }
 
@@ -11011,7 +11083,7 @@ find_authority_delimiter_special(std::string_view view) noexcept {
     uint64_t is_match = has_zero_byte(xor1) | has_zero_byte(xor2) |
                         has_zero_byte(xor3) | has_zero_byte(xor4);
     if (is_match) {
-      return i + index_of_first_set_byte(is_match);
+      return size_t(i + index_of_first_set_byte(is_match));
     }
   }
 
@@ -11026,7 +11098,9 @@ find_authority_delimiter(std::string_view view) noexcept {
   auto index_of_first_set_byte = [](uint64_t v) {
     return ((((v - 1) & 0x101010101010101) * 0x101010101010101) >> 56) - 1;
   };
-  auto broadcast = [](uint8_t v) -> uint64_t { return 0x101010101010101 * v; };
+  auto broadcast = [](uint8_t v) -> uint64_t {
+    return 0x101010101010101ull * v;
+  };
   size_t i = 0;
   uint64_t mask1 = broadcast('@');
   uint64_t mask2 = broadcast('/');
@@ -11042,7 +11116,7 @@ find_authority_delimiter(std::string_view view) noexcept {
     uint64_t is_match =
         has_zero_byte(xor1) | has_zero_byte(xor2) | has_zero_byte(xor3);
     if (is_match) {
-      return i + index_of_first_set_byte(is_match);
+      return size_t(i + index_of_first_set_byte(is_match));
     }
   }
 
@@ -11056,7 +11130,7 @@ find_authority_delimiter(std::string_view view) noexcept {
     uint64_t is_match =
         has_zero_byte(xor1) | has_zero_byte(xor2) | has_zero_byte(xor3);
     if (is_match) {
-      return i + index_of_first_set_byte(is_match);
+      return size_t(i + index_of_first_set_byte(is_match));
     }
   }
 
@@ -11164,6 +11238,7 @@ final:
   } else {
     host = ada::serializers::ipv4(ipv4);  // We have to reserialize the address.
   }
+  host_type = IPV4;
   return true;
 }
 
@@ -11228,7 +11303,7 @@ bool url::parse_ipv6(std::string_view input) {
     uint16_t value = 0, length = 0;
 
     // While length is less than 4 and c is an ASCII hex digit,
-    // set value to value × 0x10 + c interpreted as hexadecimal number, and
+    // set value to value times 0x10 + c interpreted as hexadecimal number, and
     // increase pointer and length by 1.
     while (length < 4 && pointer != input.end() &&
            unicode::is_ascii_hex_digit(*pointer)) {
@@ -11299,7 +11374,7 @@ bool url::parse_ipv6(std::string_view input) {
             ada_log("parse_ipv6 if ipv4Piece is 0, validation error");
             return is_valid = false;
           }
-          // Otherwise, set ipv4Piece to ipv4Piece × 10 + number.
+          // Otherwise, set ipv4Piece to ipv4Piece times 10 + number.
           else {
             ipv4_piece = *ipv4_piece * 10 + number;
           }
@@ -11314,7 +11389,8 @@ bool url::parse_ipv6(std::string_view input) {
           pointer++;
         }
 
-        // Set address[pieceIndex] to address[pieceIndex] × 0x100 + ipv4Piece.
+        // Set address[pieceIndex] to address[pieceIndex] times 0x100 +
+        // ipv4Piece.
         // https://stackoverflow.com/questions/39060852/why-does-the-addition-of-two-shorts-return-an-int
         address[piece_index] =
             uint16_t(address[piece_index] * 0x100 + *ipv4_piece);
@@ -11367,14 +11443,14 @@ bool url::parse_ipv6(std::string_view input) {
 
   // If compress is non-null, then:
   if (compress.has_value()) {
-    // Let swaps be pieceIndex − compress.
+    // Let swaps be pieceIndex - compress.
     int swaps = piece_index - *compress;
 
     // Set pieceIndex to 7.
     piece_index = 7;
 
     // While pieceIndex is not 0 and swaps is greater than 0,
-    // swap address[pieceIndex] with address[compress + swaps − 1], and then
+    // swap address[pieceIndex] with address[compress + swaps - 1], and then
     // decrease both pieceIndex and swaps by 1.
     while (piece_index != 0 && swaps > 0) {
       std::swap(address[piece_index], address[*compress + swaps - 1]);
@@ -11392,6 +11468,7 @@ bool url::parse_ipv6(std::string_view input) {
   }
   host = ada::serializers::ipv6(address);
   ada_log("parse_ipv6 ", *host);
+  host_type = IPV6;
   return true;
 }
 
@@ -11405,7 +11482,7 @@ ada_really_inline bool url::parse_scheme(const std::string_view input) {
    **/
   if (is_input_special) {  // fast path!!!
     if (has_state_override) {
-      // If url’s scheme is not a special scheme and buffer is a special scheme,
+      // If url's scheme is not a special scheme and buffer is a special scheme,
       // then return.
       if (is_special() != is_input_special) {
         return true;
@@ -11413,12 +11490,12 @@ ada_really_inline bool url::parse_scheme(const std::string_view input) {
 
       // If url includes credentials or has a non-null port, and buffer is
       // "file", then return.
-      if ((includes_credentials() || port.has_value()) &&
+      if ((has_credentials() || port.has_value()) &&
           parsed_type == ada::scheme::type::FILE) {
         return true;
       }
 
-      // If url’s scheme is "file" and its host is an empty host, then return.
+      // If url's scheme is "file" and its host is an empty host, then return.
       // An empty host is the empty string.
       if (type == ada::scheme::type::FILE && host.has_value() &&
           host.value().empty()) {
@@ -11433,7 +11510,7 @@ ada_really_inline bool url::parse_scheme(const std::string_view input) {
       uint16_t urls_scheme_port = get_special_port();
 
       if (urls_scheme_port) {
-        // If url’s port is url’s scheme’s default port, then set url’s port to
+        // If url's port is url's scheme's default port, then set url's port to
         // null.
         if (port.has_value() && *port == urls_scheme_port) {
           port = std::nullopt;
@@ -11449,8 +11526,8 @@ ada_really_inline bool url::parse_scheme(const std::string_view input) {
     unicode::to_lower_ascii(_buffer.data(), _buffer.size());
 
     if (has_state_override) {
-      // If url’s scheme is a special scheme and buffer is not a special scheme,
-      // then return. If url’s scheme is not a special scheme and buffer is a
+      // If url's scheme is a special scheme and buffer is not a special scheme,
+      // then return. If url's scheme is not a special scheme and buffer is a
       // special scheme, then return.
       if (is_special() != ada::scheme::is_special(_buffer)) {
         return true;
@@ -11458,11 +11535,11 @@ ada_really_inline bool url::parse_scheme(const std::string_view input) {
 
       // If url includes credentials or has a non-null port, and buffer is
       // "file", then return.
-      if ((includes_credentials() || port.has_value()) && _buffer == "file") {
+      if ((has_credentials() || port.has_value()) && _buffer == "file") {
         return true;
       }
 
-      // If url’s scheme is "file" and its host is an empty host, then return.
+      // If url's scheme is "file" and its host is an empty host, then return.
       // An empty host is the empty string.
       if (type == ada::scheme::type::FILE && host.has_value() &&
           host.value().empty()) {
@@ -11477,7 +11554,7 @@ ada_really_inline bool url::parse_scheme(const std::string_view input) {
       uint16_t urls_scheme_port = get_special_port();
 
       if (urls_scheme_port) {
-        // If url’s port is url’s scheme’s default port, then set url’s port to
+        // If url's port is url's scheme's default port, then set url's port to
         // null.
         if (port.has_value() && *port == urls_scheme_port) {
           port = std::nullopt;
@@ -11597,10 +11674,9 @@ ada_really_inline void url::parse_path(std::string_view input) {
       path = "/";
     }
   }
-  return;
 }
 
-std::string url::to_string() const {
+[[nodiscard]] std::string url::to_string() const {
   if (!is_valid) {
     return "null";
   }
@@ -11610,7 +11686,7 @@ std::string url::to_string() const {
   answer.append("\t\"protocol\":\"");
   helpers::encode_json(get_protocol(), back);
   answer.append("\",\n");
-  if (includes_credentials()) {
+  if (has_credentials()) {
     answer.append("\t\"username\":\"");
     helpers::encode_json(username, back);
     answer.append("\",\n");
@@ -11633,16 +11709,16 @@ std::string url::to_string() const {
   answer.append("\",\n");
   answer.append("\t\"opaque path\":");
   answer.append((has_opaque_path ? "true" : "false"));
-  if (base_search_has_value()) {
+  if (has_search()) {
     answer.append(",\n");
     answer.append("\t\"query\":\"");
     helpers::encode_json(query.value(), back);
     answer.append("\"");
   }
-  if (fragment.has_value()) {
+  if (hash.has_value()) {
     answer.append(",\n");
-    answer.append("\t\"fragment\":\"");
-    helpers::encode_json(fragment.value(), back);
+    answer.append("\t\"hash\":\"");
+    helpers::encode_json(hash.value(), back);
     answer.append("\"");
   }
   answer.append("\n}");
@@ -11680,7 +11756,10 @@ namespace ada {
   if (non_special_scheme == "blob") {
     if (!path.empty()) {
       auto result = ada::parse<ada::url>(path);
-      if (result && result->is_special()) {
+      if (result &&
+          (result->type == scheme::HTTP || result->type == scheme::HTTPS)) {
+        // If pathURL's scheme is not "http" and not "https", then return a
+        // new opaque origin.
         return ada::helpers::concat(result->get_protocol(), "//",
                                     result->get_host());
       }
@@ -11700,9 +11779,9 @@ namespace ada {
 }
 
 [[nodiscard]] std::string url::get_host() const noexcept {
-  // If url’s host is null, then return the empty string.
-  // If url’s port is null, return url’s host, serialized.
-  // Return url’s host, serialized, followed by U+003A (:) and url’s port,
+  // If url's host is null, then return the empty string.
+  // If url's port is null, return url's host, serialized.
+  // Return url's host, serialized, followed by U+003A (:) and url's port,
   // serialized.
   if (!host.has_value()) {
     return "";
@@ -11717,13 +11796,13 @@ namespace ada {
   return host.value_or("");
 }
 
-[[nodiscard]] const std::string_view url::get_pathname() const noexcept {
+[[nodiscard]] std::string_view url::get_pathname() const noexcept {
   return path;
 }
 
 [[nodiscard]] std::string url::get_search() const noexcept {
-  // If this’s URL’s query is either null or the empty string, then return the
-  // empty string. Return U+003F (?), followed by this’s URL’s query.
+  // If this's URL's query is either null or the empty string, then return the
+  // empty string. Return U+003F (?), followed by this's URL's query.
   return (!query.has_value() || (query.value().empty())) ? ""
                                                          : "?" + query.value();
 }
@@ -11741,11 +11820,10 @@ namespace ada {
 }
 
 [[nodiscard]] std::string url::get_hash() const noexcept {
-  // If this’s URL’s fragment is either null or the empty string, then return
-  // the empty string. Return U+0023 (#), followed by this’s URL’s fragment.
-  return (!fragment.has_value() || (fragment.value().empty()))
-             ? ""
-             : "#" + fragment.value();
+  // If this's URL's fragment is either null or the empty string, then return
+  // the empty string. Return U+0023 (#), followed by this's URL's fragment.
+  return (!hash.has_value() || (hash.value().empty())) ? ""
+                                                       : "#" + hash.value();
 }
 
 }  // namespace ada
@@ -11798,15 +11876,15 @@ bool url::set_host_or_hostname(const std::string_view input) {
     }
     // If url is special and host_view is the empty string, validation error,
     // return failure. Otherwise, if state override is given, host_view is the
-    // empty string, and either url includes credentials or url’s port is
+    // empty string, and either url includes credentials or url's port is
     // non-null, return.
     else if (host_view.empty() &&
-             (is_special() || includes_credentials() || port.has_value())) {
+             (is_special() || has_credentials() || port.has_value())) {
       return false;
     }
 
     // Let host be the result of host parsing host_view with url is not special.
-    if (host_view.empty()) {
+    if (host_view.empty() && !is_special()) {
       host = "";
       return true;
     }
@@ -11825,7 +11903,7 @@ bool url::set_host_or_hostname(const std::string_view input) {
   }
 
   if (new_host.empty()) {
-    // Set url’s host to the empty string.
+    // Set url's host to the empty string.
     host = "";
   } else {
     // Let host be the result of host parsing buffer with url is not special.
@@ -11901,7 +11979,7 @@ bool url::set_port(const std::string_view input) {
 
 void url::set_hash(const std::string_view input) {
   if (input.empty()) {
-    fragment = std::nullopt;
+    hash = std::nullopt;
     helpers::strip_trailing_spaces_from_opaque_path(*this);
     return;
   }
@@ -11909,8 +11987,8 @@ void url::set_hash(const std::string_view input) {
   std::string new_value;
   new_value = input[0] == '#' ? input.substr(1) : input;
   helpers::remove_ascii_tab_or_newline(new_value);
-  fragment = unicode::percent_encode(
-      new_value, ada::character_sets::FRAGMENT_PERCENT_ENCODE);
+  hash = unicode::percent_encode(new_value,
+                                 ada::character_sets::FRAGMENT_PERCENT_ENCODE);
   return;
 }
 
@@ -11976,7 +12054,7 @@ bool url::set_href(const std::string_view input) {
     port = out->port;
     path = out->path;
     query = out->query;
-    fragment = out->fragment;
+    hash = out->hash;
     type = out->type;
     non_special_scheme = out->non_special_scheme;
     has_opaque_path = out->has_opaque_path;
@@ -12019,13 +12097,12 @@ result_type parse_url(std::string_view user_input,
 
   // We refuse to parse URL strings that exceed 4GB. Such strings are almost
   // surely the result of a bug or are otherwise a security concern.
-  if (user_input.size() >=
-      std::string_view::size_type(std::numeric_limits<uint32_t>::max)) {
+  if (user_input.size() > std::numeric_limits<uint32_t>::max()) {
     url.is_valid = false;
   }
-
-  // If we are provided with an invalid base, or the optional_url was invalid,
-  // we must return.
+  // Going forward, user_input.size() is in [0,
+  // std::numeric_limits<uint32_t>::max). If we are provided with an invalid
+  // base, or the optional_url was invalid, we must return.
   if (base_url != nullptr) {
     url.is_valid &= base_url->is_valid;
   }
@@ -12036,14 +12113,17 @@ result_type parse_url(std::string_view user_input,
     // Most of the time, we just need user_input.size().
     // In some instances, we may need a bit more.
     ///////////////////////////
-    // This is *very* important. This line should be removed
+    // This is *very* important. This line should *not* be removed
     // hastily. There are principled reasons why reserve is important
     // for performance. If you have a benchmark with small inputs,
     // it may not matter, but in other instances, it could.
     ////
     // This rounds up to the next power of two.
+    // We know that user_input.size() is in [0,
+    // std::numeric_limits<uint32_t>::max).
     uint32_t reserve_capacity =
-        (0xFFFFFFFF >> helpers::leading_zeroes(uint32_t(user_input.size()))) +
+        (0xFFFFFFFF >>
+         helpers::leading_zeroes(uint32_t(1 | user_input.size()))) +
         1;
     url.reserve(reserve_capacity);
     //
@@ -12068,7 +12148,7 @@ result_type parse_url(std::string_view user_input,
   helpers::trim_c0_whitespace(url_data);
 
   // Optimization opportunity. Most websites do not have fragment.
-  std::optional<std::string_view> fragment = helpers::prune_fragment(url_data);
+  std::optional<std::string_view> fragment = helpers::prune_hash(url_data);
   // We add it last so that an implementation like ada::url_aggregator
   // can append it last to its internal buffer, thus improving performance.
 
@@ -12128,13 +12208,13 @@ result_type parse_url(std::string_view user_input,
           }
           ada_log("SCHEME the scheme is ", url.get_protocol());
 
-          // If url’s scheme is "file", then:
+          // If url's scheme is "file", then:
           if (url.type == ada::scheme::type::FILE) {
             // Set state to file state.
             state = ada::state::FILE;
           }
-          // Otherwise, if url is special, base is non-null, and base’s scheme
-          // is url’s scheme: Note: Doing base_url->scheme is unsafe if base_url
+          // Otherwise, if url is special, base is non-null, and base's scheme
+          // is url's scheme: Note: Doing base_url->scheme is unsafe if base_url
           // != nullptr is false.
           else if (url.is_special() && base_url != nullptr &&
                    base_url->type == url.type) {
@@ -12153,7 +12233,7 @@ result_type parse_url(std::string_view user_input,
             state = ada::state::PATH_OR_AUTHORITY;
             input_position++;
           }
-          // Otherwise, set url’s path to the empty string and set state to
+          // Otherwise, set url's path to the empty string and set state to
           // opaque path state.
           else {
             state = ada::state::OPAQUE_PATH;
@@ -12181,8 +12261,8 @@ result_type parse_url(std::string_view user_input,
           return url;
         }
         // Otherwise, if base has an opaque path and c is U+0023 (#),
-        // set url’s scheme to base’s scheme, url’s path to base’s path, url’s
-        // query to base’s query, and set state to fragment state.
+        // set url's scheme to base's scheme, url's path to base's path, url's
+        // query to base's query, and set state to fragment state.
         else if (base_url->has_opaque_path && fragment.has_value() &&
                  input_position == input_size) {
           ada_log("NO_SCHEME opaque base with fragment");
@@ -12199,7 +12279,7 @@ result_type parse_url(std::string_view user_input,
           url.update_unencoded_base_hash(*fragment);
           return url;
         }
-        // Otherwise, if base’s scheme is not "file", set state to relative
+        // Otherwise, if base's scheme is not "file", set state to relative
         // state and decrease pointer by 1.
         else if (base_url->type != ada::scheme::type::FILE) {
           ada_log("NO_SCHEME non-file relative path");
@@ -12372,7 +12452,7 @@ result_type parse_url(std::string_view user_input,
         ada_log("RELATIVE_SCHEME ",
                 helpers::substring(url_data, input_position));
 
-        // Set url’s scheme to base’s scheme.
+        // Set url's scheme to base's scheme.
         url.copy_scheme(*base_url);
 
         // If c is U+002F (/), then set state to relative slash state.
@@ -12392,15 +12472,17 @@ result_type parse_url(std::string_view user_input,
           state = ada::state::RELATIVE_SLASH;
         } else {
           ada_log("RELATIVE_SCHEME otherwise");
-          // Set url’s username to base’s username, url’s password to base’s
-          // password, url’s host to base’s host, url’s port to base’s port,
-          // url’s path to a clone of base’s path, and url’s query to base’s
+          // Set url's username to base's username, url's password to base's
+          // password, url's host to base's host, url's port to base's port,
+          // url's path to a clone of base's path, and url's query to base's
           // query.
           if constexpr (result_type_is_ada_url) {
             url.username = base_url->username;
             url.password = base_url->password;
             url.host = base_url->host;
             url.port = base_url->port;
+            // cloning the base path includes cloning the has_opaque_path flag
+            url.has_opaque_path = base_url->has_opaque_path;
             url.path = base_url->path;
             url.query = base_url->query;
           } else {
@@ -12410,13 +12492,15 @@ result_type parse_url(std::string_view user_input,
             // update_base_hostname
             url.set_hostname(base_url->get_hostname());
             url.update_base_port(base_url->retrieve_base_port());
+            // cloning the base path includes cloning the has_opaque_path flag
+            url.has_opaque_path = base_url->has_opaque_path;
             url.update_base_pathname(base_url->get_pathname());
             url.update_base_search(base_url->get_search());
           }
 
           url.has_opaque_path = base_url->has_opaque_path;
 
-          // If c is U+003F (?), then set url’s query to the empty string, and
+          // If c is U+003F (?), then set url's query to the empty string, and
           // state to query state.
           if ((input_position != input_size) &&
               (url_data[input_position] == '?')) {
@@ -12424,10 +12508,10 @@ result_type parse_url(std::string_view user_input,
           }
           // Otherwise, if c is not the EOF code point:
           else if (input_position != input_size) {
-            // Set url’s query to null.
-            url.clear_base_search();
+            // Set url's query to null.
+            url.clear_search();
             if constexpr (result_type_is_ada_url) {
-              // Shorten url’s path.
+              // Shorten url's path.
               helpers::shorten_path(url.path, url.type);
             } else {
               std::string_view path = url.get_pathname();
@@ -12460,10 +12544,10 @@ result_type parse_url(std::string_view user_input,
           state = ada::state::AUTHORITY;
         }
         // Otherwise, set
-        // - url’s username to base’s username,
-        // - url’s password to base’s password,
-        // - url’s host to base’s host,
-        // - url’s port to base’s port,
+        // - url's username to base's username,
+        // - url's password to base's password,
+        // - url's host to base's host,
+        // - url's port to base's port,
         // - state to path state, and then, decrease pointer by 1.
         else {
           if constexpr (result_type_is_ada_url) {
@@ -12493,7 +12577,6 @@ result_type parse_url(std::string_view user_input,
         // If c is U+002F (/) and remaining starts with U+002F (/),
         // then set state to special authority ignore slashes state and increase
         // pointer by 1.
-        state = ada::state::SPECIAL_AUTHORITY_IGNORE_SLASHES;
         std::string_view view = helpers::substring(url_data, input_position);
         if (ada::checkers::begins_with(view, "//")) {
           input_position += 2;
@@ -12525,7 +12608,7 @@ result_type parse_url(std::string_view user_input,
                              : ada::character_sets::QUERY_PERCENT_ENCODE;
 
         // Percent-encode after encoding, with encoding, buffer, and
-        // queryPercentEncodeSet, and append the result to url’s query.
+        // queryPercentEncodeSet, and append the result to url's query.
         url.update_base_search(helpers::substring(url_data, input_position),
                                query_percent_encode_set);
         ada_log("QUERY update_base_search completed ");
@@ -12556,7 +12639,7 @@ result_type parse_url(std::string_view user_input,
             return url;
           }
           ada_log("HOST parsing results in ", url.get_hostname());
-          // Set url’s host to host, buffer to the empty string, and state to
+          // Set url's host to host, buffer to the empty string, and state to
           // port state.
           state = ada::state::PORT;
           input_position++;
@@ -12584,7 +12667,7 @@ result_type parse_url(std::string_view user_input,
           ada_log("HOST parsing results in ", url.get_hostname(),
                   " href=", url.get_href());
 
-          // Set url’s host to host, and state to path start state.
+          // Set url's host to host, and state to path start state.
           state = ada::state::PATH_START;
         }
 
@@ -12593,7 +12676,7 @@ result_type parse_url(std::string_view user_input,
       case ada::state::OPAQUE_PATH: {
         ada_log("OPAQUE_PATH ", helpers::substring(url_data, input_position));
         std::string_view view = helpers::substring(url_data, input_position);
-        // If c is U+003F (?), then set url’s query to the empty string and
+        // If c is U+003F (?), then set url's query to the empty string and
         // state to query state.
         size_t location = view.find('?');
         if (location != std::string_view::npos) {
@@ -12648,7 +12731,7 @@ result_type parse_url(std::string_view user_input,
           }
         }
         // Otherwise, if state override is not given and c is U+003F (?),
-        // set url’s query to the empty string and state to query state.
+        // set url's query to the empty string and state to query state.
         else if ((input_position != input_size) &&
                  (url_data[input_position] == '?')) {
           state = ada::state::QUERY;
@@ -12702,12 +12785,12 @@ result_type parse_url(std::string_view user_input,
           input_position++;
         } else {
           ada_log("FILE_SLASH otherwise");
-          // If base is non-null and base’s scheme is "file", then:
+          // If base is non-null and base's scheme is "file", then:
           // Note: it is unsafe to do base_url->scheme unless you know that
           // base_url_has_value() is true.
           if (base_url != nullptr &&
               base_url->type == ada::scheme::type::FILE) {
-            // Set url’s host to base’s host.
+            // Set url's host to base's host.
             if constexpr (result_type_is_ada_url) {
               url.host = base_url->host;
             } else {
@@ -12715,9 +12798,9 @@ result_type parse_url(std::string_view user_input,
               url.set_host(base_url->get_host());
             }
             // If the code point substring from pointer to the end of input does
-            // not start with a Windows drive letter and base’s path[0] is a
-            // normalized Windows drive letter, then append base’s path[0] to
-            // url’s path.
+            // not start with a Windows drive letter and base's path[0] is a
+            // normalized Windows drive letter, then append base's path[0] to
+            // url's path.
             if (!base_url->get_pathname().empty()) {
               if (!checkers::is_windows_drive_letter(
                       helpers::substring(url_data, input_position))) {
@@ -12759,7 +12842,7 @@ result_type parse_url(std::string_view user_input,
         if (checkers::is_windows_drive_letter(file_host_buffer)) {
           state = ada::state::PATH;
         } else if (file_host_buffer.empty()) {
-          // Set url’s host to the empty string.
+          // Set url's host to the empty string.
           if constexpr (result_type_is_ada_url) {
             url.host = "";
           } else {
@@ -12800,7 +12883,7 @@ result_type parse_url(std::string_view user_input,
 
         url.set_protocol_as_file();
         if constexpr (result_type_is_ada_url) {
-          // Set url’s host to the empty string.
+          // Set url's host to the empty string.
           url.host = "";
         } else {
           url.update_base_hostname("");
@@ -12813,11 +12896,11 @@ result_type parse_url(std::string_view user_input,
           // Set state to file slash state.
           state = ada::state::FILE_SLASH;
         }
-        // Otherwise, if base is non-null and base’s scheme is "file":
+        // Otherwise, if base is non-null and base's scheme is "file":
         else if (base_url != nullptr &&
                  base_url->type == ada::scheme::type::FILE) {
-          // Set url’s host to base’s host, url’s path to a clone of base’s
-          // path, and url’s query to base’s query.
+          // Set url's host to base's host, url's path to a clone of base's
+          // path, and url's query to base's query.
           ada_log("FILE base non-null");
           if constexpr (result_type_is_ada_url) {
             url.host = base_url->host;
@@ -12832,18 +12915,17 @@ result_type parse_url(std::string_view user_input,
           }
           url.has_opaque_path = base_url->has_opaque_path;
 
-          // If c is U+003F (?), then set url’s query to the empty string and
+          // If c is U+003F (?), then set url's query to the empty string and
           // state to query state.
           if (input_position != input_size && url_data[input_position] == '?') {
             state = ada::state::QUERY;
           }
           // Otherwise, if c is not the EOF code point:
           else if (input_position != input_size) {
-            // Set url’s query to null.
-            url.clear_base_search();
-
+            // Set url's query to null.
+            url.clear_search();
             // If the code point substring from pointer to the end of input does
-            // not start with a Windows drive letter, then shorten url’s path.
+            // not start with a Windows drive letter, then shorten url's path.
             if (!checkers::is_windows_drive_letter(file_view)) {
               if constexpr (result_type_is_ada_url) {
                 helpers::shorten_path(url.path, url.type);
@@ -12856,12 +12938,8 @@ result_type parse_url(std::string_view user_input,
             }
             // Otherwise:
             else {
-              // Set url’s path to an empty list.
-              if constexpr (result_type_is_ada_url) {
-                url.path.clear();
-              } else {
-                url.clear_base_pathname();
-              }
+              // Set url's path to an empty list.
+              url.clear_pathname();
               url.has_opaque_path = true;
             }
 
@@ -12904,7 +12982,7 @@ template url_aggregator parse_url<url_aggregator>(
 
 namespace ada {
 
-bool url_components::check_offset_consistency() const noexcept {
+[[nodiscard]] bool url_components::check_offset_consistency() const noexcept {
   /**
    * https://user:pass@example.com:1234/foo/bar?baz#quux
    *       |     |    |          | ^^^^|       |   |
@@ -12980,7 +13058,7 @@ bool url_components::check_offset_consistency() const noexcept {
   return true;
 }
 
-std::string url_components::to_string() const {
+[[nodiscard]] std::string url_components::to_string() const {
   std::string answer;
   auto back = std::back_insert_iterator(answer);
   answer.append("{\n");
@@ -13045,7 +13123,7 @@ template <bool has_state_override>
    **/
   if (is_input_special) {  // fast path!!!
     if (has_state_override) {
-      // If url’s scheme is not a special scheme and buffer is a special scheme,
+      // If url's scheme is not a special scheme and buffer is a special scheme,
       // then return.
       if (is_special() != is_input_special) {
         return true;
@@ -13053,13 +13131,12 @@ template <bool has_state_override>
 
       // If url includes credentials or has a non-null port, and buffer is
       // "file", then return.
-      if ((includes_credentials() ||
-           components.port != url_components::omitted) &&
+      if ((has_credentials() || components.port != url_components::omitted) &&
           parsed_type == ada::scheme::type::FILE) {
         return true;
       }
 
-      // If url’s scheme is "file" and its host is an empty host, then return.
+      // If url's scheme is "file" and its host is an empty host, then return.
       // An empty host is the empty string.
       if (type == ada::scheme::type::FILE &&
           components.host_start == components.host_end) {
@@ -13074,10 +13151,10 @@ template <bool has_state_override>
       // This is uncommon.
       uint16_t urls_scheme_port = get_special_port();
 
-      // If url’s port is url’s scheme’s default port, then set url’s port to
+      // If url's port is url's scheme's default port, then set url's port to
       // null.
       if (components.port == urls_scheme_port) {
-        clear_base_port();
+        clear_port();
       }
     }
   } else {  // slow path
@@ -13088,8 +13165,8 @@ template <bool has_state_override>
     unicode::to_lower_ascii(_buffer.data(), _buffer.size());
 
     if (has_state_override) {
-      // If url’s scheme is a special scheme and buffer is not a special scheme,
-      // then return. If url’s scheme is not a special scheme and buffer is a
+      // If url's scheme is a special scheme and buffer is not a special scheme,
+      // then return. If url's scheme is not a special scheme and buffer is a
       // special scheme, then return.
       if (is_special() != ada::scheme::is_special(_buffer)) {
         return true;
@@ -13097,13 +13174,12 @@ template <bool has_state_override>
 
       // If url includes credentials or has a non-null port, and buffer is
       // "file", then return.
-      if ((includes_credentials() ||
-           components.port != url_components::omitted) &&
+      if ((has_credentials() || components.port != url_components::omitted) &&
           _buffer == "file") {
         return true;
       }
 
-      // If url’s scheme is "file" and its host is an empty host, then return.
+      // If url's scheme is "file" and its host is an empty host, then return.
       // An empty host is the empty string.
       if (type == ada::scheme::type::FILE &&
           components.host_start == components.host_end) {
@@ -13117,10 +13193,10 @@ template <bool has_state_override>
       // This is uncommon.
       uint16_t urls_scheme_port = get_special_port();
 
-      // If url’s port is url’s scheme’s default port, then set url’s port to
+      // If url's port is url's scheme's default port, then set url's port to
       // null.
       if (components.port == urls_scheme_port) {
-        clear_base_port();
+        clear_port();
       }
     }
   }
@@ -13301,7 +13377,7 @@ bool url_aggregator::set_port(const std::string_view input) {
   std::string trimmed(input);
   helpers::remove_ascii_tab_or_newline(trimmed);
   if (trimmed.empty()) {
-    clear_base_port();
+    clear_port();
     return true;
   }
   // Input should not start with control characters.
@@ -13332,7 +13408,7 @@ bool url_aggregator::set_pathname(const std::string_view input) {
   if (has_opaque_path) {
     return false;
   }
-  clear_base_pathname();
+  clear_pathname();
   parse_path(input);
   if (checkers::begins_with(input, "//") && !has_authority() &&
       !has_dash_dot()) {
@@ -13389,7 +13465,7 @@ void url_aggregator::set_search(const std::string_view input) {
   ADA_ASSERT_TRUE(validate());
   ADA_ASSERT_TRUE(!helpers::overlaps(input, buffer));
   if (input.empty()) {
-    clear_base_search();
+    clear_search();
     helpers::strip_trailing_spaces_from_opaque_path(*this);
     return;
   }
@@ -13473,16 +13549,23 @@ ada_really_inline bool url_aggregator::parse_host(std::string_view input) {
   // to ASCII with domain and false. The most common case is an ASCII input, in
   // which case we do not need to call the expensive 'to_ascii' if a few
   // conditions are met: no '%' and no 'xn-' subsequence.
-  std::string _buffer = std::string(input);
-  // This next function checks that the result is ascii, but we are going to
-  // to check anyhow with is_forbidden.
-  // bool is_ascii =
-  unicode::to_lower_ascii(_buffer.data(), _buffer.size());
-  bool is_forbidden = unicode::contains_forbidden_domain_code_point(
-      _buffer.data(), _buffer.size());
-  if (is_forbidden == 0 && _buffer.find("xn-") == std::string_view::npos) {
+
+  // Often, the input does not contain any forbidden code points, and no upper
+  // case ASCII letter, then we can just copy it to the buffer. We want to
+  // optimize for such a common case.
+  uint8_t is_forbidden_or_upper =
+      unicode::contains_forbidden_domain_code_point_or_upper(input.data(),
+                                                             input.size());
+  // Minor optimization opportunity:
+  // contains_forbidden_domain_code_point_or_upper could be extend to check for
+  // the presence of characters that cannot appear in the ipv4 address and we
+  // could also check whether x and n and - are present, and so we could skip
+  // some of the checks below. However, the gains are likely to be small, and
+  // the code would be more complex.
+  if (is_forbidden_or_upper == 0 &&
+      input.find("xn-") == std::string_view::npos) {
     // fast path
-    update_base_hostname(_buffer);
+    update_base_hostname(input);
     if (checkers::is_ipv4(get_hostname())) {
       ada_log("parse_host fast path ipv4");
       return parse_ipv4(get_hostname());
@@ -13490,6 +13573,10 @@ ada_really_inline bool url_aggregator::parse_host(std::string_view input) {
     ada_log("parse_host fast path ", get_hostname());
     return true;
   }
+  // We have encountered at least one forbidden code point or the input contains
+  // 'xn-' (case insensitive), so we need to call 'to_ascii' to perform the full
+  // conversion.
+
   ada_log("parse_host calling to_ascii");
   std::optional<std::string> host = std::string(get_hostname());
   is_valid = ada::unicode::to_ascii(host, input, input.find('%'));
@@ -13555,18 +13642,17 @@ bool url_aggregator::set_host_or_hostname(const std::string_view input) {
     }
     // If url is special and host_view is the empty string, validation error,
     // return failure. Otherwise, if state override is given, host_view is the
-    // empty string, and either url includes credentials or url’s port is
+    // empty string, and either url includes credentials or url's port is
     // non-null, return.
     else if (host_view.empty() &&
-             (is_special() || includes_credentials() ||
-              components.port != url_components::omitted)) {
+             (is_special() || has_credentials() || has_port())) {
       return false;
     }
 
     // Let host be the result of host parsing host_view with url is not special.
-    if (host_view.empty()) {
+    if (host_view.empty() && !is_special()) {
       if (has_hostname()) {
-        clear_base_hostname();  // easy!
+        clear_hostname();  // easy!
       } else if (has_dash_dot()) {
         add_authority_slashes_if_needed();
         delete_dash_dot();
@@ -13591,8 +13677,8 @@ bool url_aggregator::set_host_or_hostname(const std::string_view input) {
   }
 
   if (new_host.empty()) {
-    // Set url’s host to the empty string.
-    clear_base_hostname();
+    // Set url's host to the empty string.
+    clear_hostname();
   } else {
     // Let host be the result of host parsing buffer with url is not special.
     if (!parse_host(new_host)) {
@@ -13604,7 +13690,7 @@ bool url_aggregator::set_host_or_hostname(const std::string_view input) {
     // If host is "localhost", then set host to the empty string.
     if (helpers::substring(buffer, components.host_start,
                            components.host_end) == "localhost") {
-      clear_base_hostname();
+      clear_hostname();
     }
   }
   ADA_ASSERT_TRUE(validate());
@@ -13640,7 +13726,9 @@ bool url_aggregator::set_hostname(const std::string_view input) {
     std::string_view path = get_pathname();
     if (!path.empty()) {
       auto out = ada::parse<ada::url_aggregator>(path);
-      if (out && out->is_special()) {
+      if (out && (out->type == scheme::HTTP || out->type == scheme::HTTPS)) {
+        // If pathURL's scheme is not "http" and not "https", then return a
+        // new opaque origin.
         return helpers::concat(out->get_protocol(), "//", out->get_host());
       }
     }
@@ -13679,8 +13767,8 @@ bool url_aggregator::set_hostname(const std::string_view input) {
 
 [[nodiscard]] std::string_view url_aggregator::get_hash() const noexcept {
   ada_log("url_aggregator::get_hash");
-  // If this’s URL’s fragment is either null or the empty string, then return
-  // the empty string. Return U+0023 (#), followed by this’s URL’s fragment.
+  // If this's URL's fragment is either null or the empty string, then return
+  // the empty string. Return U+0023 (#), followed by this's URL's fragment.
   if (components.hash_start == url_components::omitted) {
     return "";
   }
@@ -13692,8 +13780,11 @@ bool url_aggregator::set_hostname(const std::string_view input) {
 
 [[nodiscard]] std::string_view url_aggregator::get_host() const noexcept {
   ada_log("url_aggregator::get_host");
+  // Technically, we should check if there is a hostname, but
+  // the code below works even if there isn't.
+  // if(!has_hostname()) { return ""; }
   size_t start = components.host_start;
-  if (buffer.size() > components.host_start &&
+  if (components.host_end > components.host_start &&
       buffer[components.host_start] == '@') {
     start++;
   }
@@ -13707,9 +13798,12 @@ bool url_aggregator::set_hostname(const std::string_view input) {
 
 [[nodiscard]] std::string_view url_aggregator::get_hostname() const noexcept {
   ada_log("url_aggregator::get_hostname");
+  // Technically, we should check if there is a hostname, but
+  // the code below works even if there isn't.
+  // if(!has_hostname()) { return ""; }
   size_t start = components.host_start;
   // So host_start is not where the host begins.
-  if (buffer.size() > components.host_start &&
+  if (components.host_end > components.host_start &&
       buffer[components.host_start] == '@') {
     start++;
   }
@@ -13732,8 +13826,8 @@ bool url_aggregator::set_hostname(const std::string_view input) {
 
 [[nodiscard]] std::string_view url_aggregator::get_search() const noexcept {
   ada_log("url_aggregator::get_search");
-  // If this’s URL’s query is either null or the empty string, then return the
-  // empty string. Return U+003F (?), followed by this’s URL’s query.
+  // If this's URL's query is either null or the empty string, then return the
+  // empty string. Return U+003F (?), followed by this's URL's query.
   if (components.search_start == url_components::omitted) {
     return "";
   }
@@ -13752,7 +13846,7 @@ bool url_aggregator::set_hostname(const std::string_view input) {
   return helpers::substring(buffer, 0, components.protocol_end);
 }
 
-std::string ada::url_aggregator::to_string() const {
+[[nodiscard]] std::string ada::url_aggregator::to_string() const {
   ada_log("url_aggregator::to_string buffer:", buffer, "[", buffer.size(),
           " bytes]");
   if (!is_valid) {
@@ -13771,7 +13865,7 @@ std::string ada::url_aggregator::to_string() const {
   helpers::encode_json(get_protocol(), back);
   answer.append("\",\n");
 
-  if (includes_credentials()) {
+  if (has_credentials()) {
     answer.append("\t\"username\":\"");
     helpers::encode_json(get_username(), back);
     answer.append("\",\n");
@@ -13933,6 +14027,7 @@ final:
     update_base_hostname(
         ada::serializers::ipv4(ipv4));  // We have to reserialize the address.
   }
+  host_type = IPV4;
   ADA_ASSERT_TRUE(validate());
   return true;
 }
@@ -14000,7 +14095,7 @@ bool url_aggregator::parse_ipv6(std::string_view input) {
     uint16_t value = 0, length = 0;
 
     // While length is less than 4 and c is an ASCII hex digit,
-    // set value to value × 0x10 + c interpreted as hexadecimal number, and
+    // set value to value times 0x10 + c interpreted as hexadecimal number, and
     // increase pointer and length by 1.
     while (length < 4 && pointer != input.end() &&
            unicode::is_ascii_hex_digit(*pointer)) {
@@ -14070,7 +14165,7 @@ bool url_aggregator::parse_ipv6(std::string_view input) {
             ada_log("parse_ipv6 if ipv4Piece is 0, validation error");
             return is_valid = false;
           }
-          // Otherwise, set ipv4Piece to ipv4Piece × 10 + number.
+          // Otherwise, set ipv4Piece to ipv4Piece times 10 + number.
           else {
             ipv4_piece = *ipv4_piece * 10 + number;
           }
@@ -14085,7 +14180,8 @@ bool url_aggregator::parse_ipv6(std::string_view input) {
           pointer++;
         }
 
-        // Set address[pieceIndex] to address[pieceIndex] × 0x100 + ipv4Piece.
+        // Set address[pieceIndex] to address[pieceIndex] times 0x100 +
+        // ipv4Piece.
         // https://stackoverflow.com/questions/39060852/why-does-the-addition-of-two-shorts-return-an-int
         address[piece_index] =
             uint16_t(address[piece_index] * 0x100 + *ipv4_piece);
@@ -14138,14 +14234,14 @@ bool url_aggregator::parse_ipv6(std::string_view input) {
 
   // If compress is non-null, then:
   if (compress.has_value()) {
-    // Let swaps be pieceIndex − compress.
+    // Let swaps be pieceIndex - compress.
     int swaps = piece_index - *compress;
 
     // Set pieceIndex to 7.
     piece_index = 7;
 
     // While pieceIndex is not 0 and swaps is greater than 0,
-    // swap address[pieceIndex] with address[compress + swaps − 1], and then
+    // swap address[pieceIndex] with address[compress + swaps - 1], and then
     // decrease both pieceIndex and swaps by 1.
     while (piece_index != 0 && swaps > 0) {
       std::swap(address[piece_index], address[*compress + swaps - 1]);
@@ -14167,6 +14263,7 @@ bool url_aggregator::parse_ipv6(std::string_view input) {
   update_base_hostname(ada::serializers::ipv6(address));
   ada_log("parse_ipv6 ", get_hostname());
   ADA_ASSERT_TRUE(validate());
+  host_type = IPV6;
   return true;
 }
 
@@ -14194,7 +14291,7 @@ bool url_aggregator::parse_opaque_host(std::string_view input) {
   return true;
 }
 
-std::string url_aggregator::to_diagram() const {
+[[nodiscard]] std::string url_aggregator::to_diagram() const {
   if (!is_valid) {
     return "invalid";
   }
@@ -14351,7 +14448,7 @@ std::string url_aggregator::to_diagram() const {
   return answer;
 }
 
-bool url_aggregator::validate() const noexcept {
+[[nodiscard]] bool url_aggregator::validate() const noexcept {
   if (!is_valid) {
     return true;
   }
@@ -14643,8 +14740,9 @@ inline void url_aggregator::consume_prepared_path(std::string_view input) {
             input.substr(previous_location, new_location - previous_location);
         previous_location = new_location + 1;
         if (path_view == "..") {
-          if (!path.empty()) {
-            path.erase(path.rfind('/'));
+          size_t last_delimiter = path.rfind('/');
+          if (last_delimiter != std::string::npos) {
+            path.erase(last_delimiter);
           }
         } else if (path_view != ".") {
           path += '/';
@@ -14675,8 +14773,8 @@ inline void url_aggregator::consume_prepared_path(std::string_view input) {
               ? path_buffer_tmp
               : path_view;
       if (unicode::is_double_dot_path_segment(path_buffer)) {
-        helpers::shorten_path(path, type);
-        if (location == std::string_view::npos) {
+        if ((helpers::shorten_path(path, type) || special) &&
+            location == std::string_view::npos) {
           path += '/';
         }
       } else if (unicode::is_single_dot_path_segment(path_buffer) &&
@@ -14685,7 +14783,7 @@ inline void url_aggregator::consume_prepared_path(std::string_view input) {
       }
       // Otherwise, if path_buffer is not a single-dot path segment, then:
       else if (!unicode::is_single_dot_path_segment(path_buffer)) {
-        // If url’s scheme is "file", url’s path is empty, and path_buffer is a
+        // If url's scheme is "file", url's path is empty, and path_buffer is a
         // Windows drive letter, then replace the second code point in
         // path_buffer with U+003A (:).
         if (type == ada::scheme::type::FILE && path.empty() &&
@@ -14696,7 +14794,7 @@ inline void url_aggregator::consume_prepared_path(std::string_view input) {
           path_buffer.remove_prefix(2);
           path.append(path_buffer);
         } else {
-          // Append path_buffer to url’s path.
+          // Append path_buffer to url's path.
           path += '/';
           path.append(path_buffer);
         }
@@ -14710,4 +14808,724 @@ inline void url_aggregator::consume_prepared_path(std::string_view input) {
 }
 }  // namespace ada
 /* end file src/url_aggregator.cpp */
+/* begin file src/ada_c.cpp */
+
+ada::result<ada::url_aggregator>& get_instance(void* result) noexcept {
+  return *(ada::result<ada::url_aggregator>*)result;
+}
+
+extern "C" {
+typedef void* ada_url;
+typedef void* ada_url_search_params;
+typedef void* ada_strings;
+typedef void* ada_url_search_params_keys_iter;
+typedef void* ada_url_search_params_values_iter;
+typedef void* ada_url_search_params_entries_iter;
+
+struct ada_string {
+  const char* data;
+  size_t length;
+};
+
+struct ada_owned_string {
+  const char* data;
+  size_t length;
+};
+
+struct ada_string_pair {
+  ada_string key;
+  ada_string value;
+};
+
+ada_string ada_string_create(const char* data, size_t length) {
+  ada_string out{};
+  out.data = data;
+  out.length = length;
+  return out;
+}
+
+struct ada_url_components {
+  /*
+   * By using 32-bit integers, we implicitly assume that the URL string
+   * cannot exceed 4 GB.
+   *
+   * https://user:pass@example.com:1234/foo/bar?baz#quux
+   *       |     |    |          | ^^^^|       |   |
+   *       |     |    |          | |   |       |   `----- hash_start
+   *       |     |    |          | |   |       `--------- search_start
+   *       |     |    |          | |   `----------------- pathname_start
+   *       |     |    |          | `--------------------- port
+   *       |     |    |          `----------------------- host_end
+   *       |     |    `---------------------------------- host_start
+   *       |     `--------------------------------------- username_end
+   *       `--------------------------------------------- protocol_end
+   */
+  uint32_t protocol_end;
+  /**
+   * Username end is not `omitted` by default (-1) to make username and password
+   * getters less costly to implement.
+   */
+  uint32_t username_end;
+  uint32_t host_start;
+  uint32_t host_end;
+  uint32_t port;
+  uint32_t pathname_start;
+  uint32_t search_start;
+  uint32_t hash_start;
+};
+
+ada_url ada_parse(const char* input, size_t length) noexcept {
+  return new ada::result<ada::url_aggregator>(
+      ada::parse<ada::url_aggregator>(std::string_view(input, length)));
+}
+
+ada_url ada_parse_with_base(const char* input, size_t input_length,
+                            const char* base, size_t base_length) noexcept {
+  auto base_out =
+      ada::parse<ada::url_aggregator>(std::string_view(base, base_length));
+
+  if (!base_out) {
+    return new ada::result<ada::url_aggregator>(base_out);
+  }
+
+  return new ada::result<ada::url_aggregator>(ada::parse<ada::url_aggregator>(
+      std::string_view(input, input_length), &base_out.value()));
+}
+
+bool ada_can_parse(const char* input, size_t length) noexcept {
+  return ada::can_parse(std::string_view(input, length));
+}
+
+bool ada_can_parse_with_base(const char* input, size_t input_length,
+                             const char* base, size_t base_length) noexcept {
+  auto base_view = std::string_view(base, base_length);
+  return ada::can_parse(std::string_view(input, input_length), &base_view);
+}
+
+void ada_free(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>* r =
+      (ada::result<ada::url_aggregator>*)result;
+  delete r;
+}
+
+ada_url ada_copy(ada_url input) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(input);
+  return new ada::result<ada::url_aggregator>(r);
+}
+
+bool ada_is_valid(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  return r.has_value();
+}
+
+// caller must free the result with ada_free_owned_string
+ada_owned_string ada_get_origin(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  ada_owned_string owned;
+  if (!r) {
+    owned.data = nullptr;
+    owned.length = 0;
+    return owned;
+  }
+  std::string out = r->get_origin();
+  owned.length = out.size();
+  owned.data = new char[owned.length];
+  memcpy((void*)owned.data, out.data(), owned.length);
+  return owned;
+}
+
+void ada_free_owned_string(ada_owned_string owned) noexcept {
+  delete[] owned.data;
+  owned.data = nullptr;
+  owned.length = 0;
+}
+
+ada_string ada_get_href(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return ada_string_create(NULL, 0);
+  }
+  std::string_view out = r->get_href();
+  return ada_string_create(out.data(), out.length());
+}
+
+ada_string ada_get_username(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return ada_string_create(NULL, 0);
+  }
+  std::string_view out = r->get_username();
+  return ada_string_create(out.data(), out.length());
+}
+
+ada_string ada_get_password(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return ada_string_create(NULL, 0);
+  }
+  std::string_view out = r->get_password();
+  return ada_string_create(out.data(), out.length());
+}
+
+ada_string ada_get_port(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return ada_string_create(NULL, 0);
+  }
+  std::string_view out = r->get_port();
+  return ada_string_create(out.data(), out.length());
+}
+
+ada_string ada_get_hash(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return ada_string_create(NULL, 0);
+  }
+  std::string_view out = r->get_hash();
+  return ada_string_create(out.data(), out.length());
+}
+
+ada_string ada_get_host(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return ada_string_create(NULL, 0);
+  }
+  std::string_view out = r->get_host();
+  return ada_string_create(out.data(), out.length());
+}
+
+ada_string ada_get_hostname(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return ada_string_create(NULL, 0);
+  }
+  std::string_view out = r->get_hostname();
+  return ada_string_create(out.data(), out.length());
+}
+
+ada_string ada_get_pathname(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return ada_string_create(NULL, 0);
+  }
+  std::string_view out = r->get_pathname();
+  return ada_string_create(out.data(), out.length());
+}
+
+ada_string ada_get_search(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return ada_string_create(NULL, 0);
+  }
+  std::string_view out = r->get_search();
+  return ada_string_create(out.data(), out.length());
+}
+
+ada_string ada_get_protocol(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return ada_string_create(NULL, 0);
+  }
+  std::string_view out = r->get_protocol();
+  return ada_string_create(out.data(), out.length());
+}
+
+uint8_t ada_get_host_type(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return 0;
+  }
+  return r->host_type;
+}
+
+uint8_t ada_get_scheme_type(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return 0;
+  }
+  return r->type;
+}
+
+bool ada_set_href(ada_url result, const char* input, size_t length) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->set_href(std::string_view(input, length));
+}
+
+bool ada_set_host(ada_url result, const char* input, size_t length) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->set_host(std::string_view(input, length));
+}
+
+bool ada_set_hostname(ada_url result, const char* input,
+                      size_t length) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->set_hostname(std::string_view(input, length));
+}
+
+bool ada_set_protocol(ada_url result, const char* input,
+                      size_t length) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->set_protocol(std::string_view(input, length));
+}
+
+bool ada_set_username(ada_url result, const char* input,
+                      size_t length) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->set_username(std::string_view(input, length));
+}
+
+bool ada_set_password(ada_url result, const char* input,
+                      size_t length) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->set_password(std::string_view(input, length));
+}
+
+bool ada_set_port(ada_url result, const char* input, size_t length) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->set_port(std::string_view(input, length));
+}
+
+bool ada_set_pathname(ada_url result, const char* input,
+                      size_t length) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->set_pathname(std::string_view(input, length));
+}
+
+/**
+ * Update the search/query of the URL.
+ *
+ * If a URL has `?` as the search value, passing empty string to this function
+ * does not remove the attribute. If you need to remove it, please use
+ * `ada_clear_search` method.
+ */
+void ada_set_search(ada_url result, const char* input, size_t length) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (r) {
+    r->set_search(std::string_view(input, length));
+  }
+}
+
+/**
+ * Update the hash/fragment of the URL.
+ *
+ * If a URL has `#` as the hash value, passing empty string to this function
+ * does not remove the attribute. If you need to remove it, please use
+ * `ada_clear_hash` method.
+ */
+void ada_set_hash(ada_url result, const char* input, size_t length) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (r) {
+    r->set_hash(std::string_view(input, length));
+  }
+}
+
+void ada_clear_port(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (r) {
+    r->clear_port();
+  }
+}
+
+/**
+ * Removes the hash of the URL.
+ *
+ * Despite `ada_set_hash` method, this function allows the complete
+ * removal of the hash attribute, even if it has a value of `#`.
+ */
+void ada_clear_hash(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (r) {
+    r->clear_hash();
+  }
+}
+
+/**
+ * Removes the search of the URL.
+ *
+ * Despite `ada_set_search` method, this function allows the complete
+ * removal of the search attribute, even if it has a value of `?`.
+ */
+void ada_clear_search(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (r) {
+    r->clear_search();
+  }
+}
+
+bool ada_has_credentials(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->has_credentials();
+}
+
+bool ada_has_empty_hostname(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->has_empty_hostname();
+}
+
+bool ada_has_hostname(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->has_hostname();
+}
+
+bool ada_has_non_empty_username(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->has_non_empty_username();
+}
+
+bool ada_has_non_empty_password(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->has_non_empty_password();
+}
+
+bool ada_has_port(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->has_port();
+}
+
+bool ada_has_password(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->has_password();
+}
+
+bool ada_has_hash(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->has_hash();
+}
+
+bool ada_has_search(ada_url result) noexcept {
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return false;
+  }
+  return r->has_search();
+}
+
+// returns a pointer to the internal url_aggregator::url_components
+const ada_url_components* ada_get_components(ada_url result) noexcept {
+  static_assert(sizeof(ada_url_components) == sizeof(ada::url_components));
+  ada::result<ada::url_aggregator>& r = get_instance(result);
+  if (!r) {
+    return nullptr;
+  }
+  return reinterpret_cast<const ada_url_components*>(&r->get_components());
+}
+
+ada_owned_string ada_idna_to_unicode(const char* input, size_t length) {
+  std::string out = ada::idna::to_unicode(std::string_view(input, length));
+  ada_owned_string owned{};
+  owned.length = out.length();
+  owned.data = new char[owned.length];
+  memcpy((void*)owned.data, out.data(), owned.length);
+  return owned;
+}
+
+ada_owned_string ada_idna_to_ascii(const char* input, size_t length) {
+  std::string out = ada::idna::to_ascii(std::string_view(input, length));
+  ada_owned_string owned{};
+  owned.length = out.size();
+  owned.data = new char[owned.length];
+  memcpy((void*)owned.data, out.data(), owned.length);
+  return owned;
+}
+
+ada_url_search_params ada_parse_search_params(const char* input,
+                                              size_t length) {
+  return new ada::result<ada::url_search_params>(
+      ada::url_search_params(std::string_view(input, length)));
+}
+
+void ada_free_search_params(ada_url_search_params result) {
+  ada::result<ada::url_search_params>* r =
+      (ada::result<ada::url_search_params>*)result;
+  delete r;
+}
+
+ada_owned_string ada_search_params_to_string(ada_url_search_params result) {
+  ada::result<ada::url_search_params>& r =
+      *(ada::result<ada::url_search_params>*)result;
+  if (!r) return ada_owned_string{NULL, 0};
+  std::string out = r->to_string();
+  ada_owned_string owned{};
+  owned.length = out.size();
+  owned.data = new char[owned.length];
+  memcpy((void*)owned.data, out.data(), owned.length);
+  return owned;
+}
+
+size_t ada_search_params_size(ada_url_search_params result) {
+  ada::result<ada::url_search_params>& r =
+      *(ada::result<ada::url_search_params>*)result;
+  if (!r) return 0;
+  return r->size();
+}
+
+void ada_search_params_sort(ada_url_search_params result) {
+  ada::result<ada::url_search_params>& r =
+      *(ada::result<ada::url_search_params>*)result;
+  if (r) r->sort();
+}
+
+void ada_search_params_append(ada_url_search_params result, const char* key,
+                              size_t key_length, const char* value,
+                              size_t value_length) {
+  ada::result<ada::url_search_params>& r =
+      *(ada::result<ada::url_search_params>*)result;
+  if (r) {
+    r->append(std::string_view(key, key_length),
+              std::string_view(value, value_length));
+  }
+}
+
+void ada_search_params_set(ada_url_search_params result, const char* key,
+                           size_t key_length, const char* value,
+                           size_t value_length) {
+  ada::result<ada::url_search_params>& r =
+      *(ada::result<ada::url_search_params>*)result;
+  if (r) {
+    r->set(std::string_view(key, key_length),
+           std::string_view(value, value_length));
+  }
+}
+
+void ada_search_params_remove(ada_url_search_params result, const char* key,
+                              size_t key_length) {
+  ada::result<ada::url_search_params>& r =
+      *(ada::result<ada::url_search_params>*)result;
+  if (r) {
+    r->remove(std::string_view(key, key_length));
+  }
+}
+
+void ada_search_params_remove_value(ada_url_search_params result,
+                                    const char* key, size_t key_length,
+                                    const char* value, size_t value_length) {
+  ada::result<ada::url_search_params>& r =
+      *(ada::result<ada::url_search_params>*)result;
+  if (r) {
+    r->remove(std::string_view(key, key_length),
+              std::string_view(value, value_length));
+  }
+}
+
+bool ada_search_params_has(ada_url_search_params result, const char* key,
+                           size_t key_length) {
+  ada::result<ada::url_search_params>& r =
+      *(ada::result<ada::url_search_params>*)result;
+  if (!r) return false;
+  return r->has(std::string_view(key, key_length));
+}
+
+bool ada_search_params_has_value(ada_url_search_params result, const char* key,
+                                 size_t key_length, const char* value,
+                                 size_t value_length) {
+  ada::result<ada::url_search_params>& r =
+      *(ada::result<ada::url_search_params>*)result;
+  if (!r) return false;
+  return r->has(std::string_view(key, key_length),
+                std::string_view(value, value_length));
+}
+
+ada_string ada_search_params_get(ada_url_search_params result, const char* key,
+                                 size_t key_length) {
+  ada::result<ada::url_search_params>& r =
+      *(ada::result<ada::url_search_params>*)result;
+  if (!r) return ada_string_create(NULL, 0);
+  auto found = r->get(std::string_view(key, key_length));
+  if (!found.has_value()) return ada_string_create(NULL, 0);
+  return ada_string_create(found->data(), found->length());
+}
+
+ada_strings ada_search_params_get_all(ada_url_search_params result,
+                                      const char* key, size_t key_length) {
+  ada::result<ada::url_search_params>& r =
+      *(ada::result<ada::url_search_params>*)result;
+  if (!r) {
+    return new ada::result<std::vector<std::string>>(
+        std::vector<std::string>());
+  }
+  return new ada::result<std::vector<std::string>>(
+      r->get_all(std::string_view(key, key_length)));
+}
+
+ada_url_search_params_keys_iter ada_search_params_get_keys(
+    ada_url_search_params result) {
+  ada::result<ada::url_search_params>& r =
+      *(ada::result<ada::url_search_params>*)result;
+  if (!r) {
+    return new ada::result<ada::url_search_params_keys_iter>(
+        ada::url_search_params_keys_iter());
+  }
+  return new ada::result<ada::url_search_params_keys_iter>(r->get_keys());
+}
+
+ada_url_search_params_values_iter ada_search_params_get_values(
+    ada_url_search_params result) {
+  ada::result<ada::url_search_params>& r =
+      *(ada::result<ada::url_search_params>*)result;
+  if (!r) {
+    return new ada::result<ada::url_search_params_values_iter>(
+        ada::url_search_params_values_iter());
+  }
+  return new ada::result<ada::url_search_params_values_iter>(r->get_values());
+}
+
+ada_url_search_params_entries_iter ada_search_params_get_entries(
+    ada_url_search_params result) {
+  ada::result<ada::url_search_params>& r =
+      *(ada::result<ada::url_search_params>*)result;
+  if (!r) {
+    return new ada::result<ada::url_search_params_entries_iter>(
+        ada::url_search_params_entries_iter());
+  }
+  return new ada::result<ada::url_search_params_entries_iter>(r->get_entries());
+}
+
+void ada_free_strings(ada_strings result) {
+  ada::result<std::vector<std::string>>* r =
+      (ada::result<std::vector<std::string>>*)result;
+  delete r;
+}
+
+size_t ada_strings_size(ada_strings result) {
+  ada::result<std::vector<std::string>>* r =
+      (ada::result<std::vector<std::string>>*)result;
+  if (!r) return 0;
+  return (*r)->size();
+}
+
+ada_string ada_strings_get(ada_strings result, size_t index) {
+  ada::result<std::vector<std::string>>* r =
+      (ada::result<std::vector<std::string>>*)result;
+  if (!r) return ada_string_create(NULL, 0);
+  std::string_view view = (*r)->at(index);
+  return ada_string_create(view.data(), view.length());
+}
+
+void ada_free_search_params_keys_iter(ada_url_search_params_keys_iter result) {
+  ada::result<ada::url_search_params_keys_iter>* r =
+      (ada::result<ada::url_search_params_keys_iter>*)result;
+  delete r;
+}
+
+ada_string ada_search_params_keys_iter_next(
+    ada_url_search_params_keys_iter result) {
+  ada::result<ada::url_search_params_keys_iter>* r =
+      (ada::result<ada::url_search_params_keys_iter>*)result;
+  if (!r) return ada_string_create(NULL, 0);
+  auto next = (*r)->next();
+  if (!next.has_value()) return ada_string_create(NULL, 0);
+  return ada_string_create(next->data(), next->length());
+}
+
+bool ada_search_params_keys_iter_has_next(
+    ada_url_search_params_keys_iter result) {
+  ada::result<ada::url_search_params_keys_iter>* r =
+      (ada::result<ada::url_search_params_keys_iter>*)result;
+  if (!r) return false;
+  return (*r)->has_next();
+}
+
+void ada_free_search_params_values_iter(
+    ada_url_search_params_values_iter result) {
+  ada::result<ada::url_search_params_values_iter>* r =
+      (ada::result<ada::url_search_params_values_iter>*)result;
+  delete r;
+}
+
+ada_string ada_search_params_values_iter_next(
+    ada_url_search_params_values_iter result) {
+  ada::result<ada::url_search_params_values_iter>* r =
+      (ada::result<ada::url_search_params_values_iter>*)result;
+  if (!r) return ada_string_create(NULL, 0);
+  auto next = (*r)->next();
+  if (!next.has_value()) return ada_string_create(NULL, 0);
+  return ada_string_create(next->data(), next->length());
+}
+
+bool ada_search_params_values_iter_has_next(
+    ada_url_search_params_values_iter result) {
+  ada::result<ada::url_search_params_values_iter>* r =
+      (ada::result<ada::url_search_params_values_iter>*)result;
+  if (!r) return false;
+  return (*r)->has_next();
+}
+
+void ada_free_search_params_entries_iter(
+    ada_url_search_params_entries_iter result) {
+  ada::result<ada::url_search_params_entries_iter>* r =
+      (ada::result<ada::url_search_params_entries_iter>*)result;
+  delete r;
+}
+
+ada_string_pair ada_search_params_entries_iter_next(
+    ada_url_search_params_entries_iter result) {
+  ada::result<ada::url_search_params_entries_iter>* r =
+      (ada::result<ada::url_search_params_entries_iter>*)result;
+  if (!r) return {ada_string_create(NULL, 0), ada_string_create(NULL, 0)};
+  auto next = (*r)->next();
+  if (!next.has_value())
+    return {ada_string_create(NULL, 0), ada_string_create(NULL, 0)};
+  return ada_string_pair{
+      ada_string_create(next->first.data(), next->first.length()),
+      ada_string_create(next->second.data(), next->second.length())};
+}
+
+bool ada_search_params_entries_iter_has_next(
+    ada_url_search_params_entries_iter result) {
+  ada::result<ada::url_search_params_entries_iter>* r =
+      (ada::result<ada::url_search_params_entries_iter>*)result;
+  if (!r) return false;
+  return (*r)->has_next();
+}
+
+}  // extern "C"
+/* end file src/ada_c.cpp */
 /* end file src/ada.cpp */

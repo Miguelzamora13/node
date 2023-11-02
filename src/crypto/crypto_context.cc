@@ -22,6 +22,7 @@ namespace node {
 
 using v8::Array;
 using v8::ArrayBufferView;
+using v8::Boolean;
 using v8::Context;
 using v8::DontDelete;
 using v8::Exception;
@@ -61,18 +62,16 @@ inline X509_STORE* GetOrCreateRootCertStore() {
 // Takes a string or buffer and loads it into a BIO.
 // Caller responsible for BIO_free_all-ing the returned object.
 BIOPointer LoadBIO(Environment* env, Local<Value> v) {
-  HandleScope scope(env->isolate());
-
-  if (v->IsString()) {
-    Utf8Value s(env->isolate(), v);
-    return NodeBIO::NewFixed(*s, s.length());
+  if (v->IsString() || v->IsArrayBufferView()) {
+    BIOPointer bio(BIO_new(BIO_s_secmem()));
+    if (!bio) return nullptr;
+    ByteSource bsrc = ByteSource::FromStringOrBuffer(env, v);
+    if (bsrc.size() > INT_MAX) return nullptr;
+    int written = BIO_write(bio.get(), bsrc.data<char>(), bsrc.size());
+    if (written < 0) return nullptr;
+    if (static_cast<size_t>(written) != bsrc.size()) return nullptr;
+    return bio;
   }
-
-  if (v->IsArrayBufferView()) {
-    ArrayBufferViewContents<char> buf(v.As<ArrayBufferView>());
-    return NodeBIO::NewFixed(buf.data(), buf.length());
-  }
-
   return nullptr;
 }
 
@@ -649,6 +648,13 @@ void SecureContext::SetEngineKey(const FunctionCallbackInfo<Value>& args) {
 
   CHECK_EQ(args.Length(), 2);
 
+  if (UNLIKELY(env->permission()->enabled())) {
+    return THROW_ERR_CRYPTO_CUSTOM_ENGINE_NOT_SUPPORTED(
+        env,
+        "Programmatic selection of OpenSSL engines is unsupported while the "
+        "experimental permission model is enabled");
+  }
+
   CryptoErrorStore errors;
   Utf8Value engine_id(env->isolate(), args[1]);
   EnginePointer engine = LoadEngineById(*engine_id, &errors);
@@ -839,8 +845,7 @@ void SecureContext::SetECDHCurve(const FunctionCallbackInfo<Value>& args) {
 
   Utf8Value curve(env->isolate(), args[0]);
 
-  if (strcmp(*curve, "auto") != 0 &&
-      !SSL_CTX_set1_curves_list(sc->ctx_.get(), *curve)) {
+  if (curve != "auto" && !SSL_CTX_set1_curves_list(sc->ctx_.get(), *curve)) {
     return THROW_ERR_CRYPTO_OPERATION_FAILED(env, "Failed to set ECDH curve");
   }
 }
@@ -1047,34 +1052,60 @@ void SecureContext::LoadPKCS12(const FunctionCallbackInfo<Value>& args) {
   EVP_PKEY* pkey_ptr = nullptr;
   X509* cert_ptr = nullptr;
   STACK_OF(X509)* extra_certs_ptr = nullptr;
-  if (d2i_PKCS12_bio(in.get(), &p12_ptr) &&
-      (p12.reset(p12_ptr), true) &&  // Move ownership to the smart pointer.
-      PKCS12_parse(p12.get(), pass.data(),
-                   &pkey_ptr,
-                   &cert_ptr,
-                   &extra_certs_ptr) &&
-      (pkey.reset(pkey_ptr), cert.reset(cert_ptr),
-       extra_certs.reset(extra_certs_ptr), true) &&  // Move ownership.
-      SSL_CTX_use_certificate_chain(sc->ctx_.get(),
-                                    std::move(cert),
-                                    extra_certs.get(),
-                                    &sc->cert_,
-                                    &sc->issuer_) &&
-      SSL_CTX_use_PrivateKey(sc->ctx_.get(), pkey.get())) {
-    // Add CA certs too
-    for (int i = 0; i < sk_X509_num(extra_certs.get()); i++) {
-      X509* ca = sk_X509_value(extra_certs.get(), i);
 
-      if (cert_store == GetOrCreateRootCertStore()) {
-        cert_store = NewRootCertStore();
-        SSL_CTX_set_cert_store(sc->ctx_.get(), cert_store);
-      }
-      X509_STORE_add_cert(cert_store, ca);
-      SSL_CTX_add_client_CA(sc->ctx_.get(), ca);
-    }
-    ret = true;
+  if (!d2i_PKCS12_bio(in.get(), &p12_ptr)) {
+    goto done;
   }
 
+  // Move ownership to the smart pointer:
+  p12.reset(p12_ptr);
+
+  if (!PKCS12_parse(
+          p12.get(), pass.data(), &pkey_ptr, &cert_ptr, &extra_certs_ptr)) {
+    goto done;
+  }
+
+  // Move ownership of the parsed data:
+  pkey.reset(pkey_ptr);
+  cert.reset(cert_ptr);
+  extra_certs.reset(extra_certs_ptr);
+
+  if (!pkey) {
+    return THROW_ERR_CRYPTO_OPERATION_FAILED(
+        env, "Unable to load private key from PFX data");
+  }
+
+  if (!cert) {
+    return THROW_ERR_CRYPTO_OPERATION_FAILED(
+        env, "Unable to load certificate from PFX data");
+  }
+
+  if (!SSL_CTX_use_certificate_chain(sc->ctx_.get(),
+                                     std::move(cert),
+                                     extra_certs.get(),
+                                     &sc->cert_,
+                                     &sc->issuer_)) {
+    goto done;
+  }
+
+  if (!SSL_CTX_use_PrivateKey(sc->ctx_.get(), pkey.get())) {
+    goto done;
+  }
+
+  // Add CA certs too
+  for (int i = 0; i < sk_X509_num(extra_certs.get()); i++) {
+    X509* ca = sk_X509_value(extra_certs.get(), i);
+
+    if (cert_store == GetOrCreateRootCertStore()) {
+      cert_store = NewRootCertStore();
+      SSL_CTX_set_cert_store(sc->ctx_.get(), cert_store);
+    }
+    X509_STORE_add_cert(cert_store, ca);
+    SSL_CTX_add_client_CA(sc->ctx_.get(), ca);
+  }
+  ret = true;
+
+done:
   if (!ret) {
     // TODO(@jasnell): Should this use ThrowCryptoError?
     unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
@@ -1103,6 +1134,13 @@ void SecureContext::SetClientCertEngine(
   // Instead of trying to fix up this problem we in turn also do not
   // support multiple calls to SetClientCertEngine.
   CHECK(!sc->client_cert_engine_provided_);
+
+  if (UNLIKELY(env->permission()->enabled())) {
+    return THROW_ERR_CRYPTO_CUSTOM_ENGINE_NOT_SUPPORTED(
+        env,
+        "Programmatic selection of OpenSSL engines is unsupported while the "
+        "experimental permission model is enabled");
+  }
 
   CryptoErrorStore errors;
   const Utf8Value engine_id(env->isolate(), args[0]);
@@ -1191,7 +1229,7 @@ int SecureContext::TicketKeyCallback(SSL* ssl,
     return -1;
   }
 
-  argv[2] = enc != 0 ? v8::True(env->isolate()) : v8::False(env->isolate());
+  argv[2] = Boolean::New(env->isolate(), enc != 0);
 
   Local<Value> ret;
   if (!node::MakeCallback(

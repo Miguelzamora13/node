@@ -4,6 +4,7 @@ const common = require('../common');
 const {
   strictEqual,
   rejects,
+  throws,
 } = require('assert');
 const { TextDecoder } = require('util');
 const {
@@ -14,13 +15,12 @@ const {
 const {
   unlink
 } = require('fs/promises');
-const path = require('path');
 const { Blob } = require('buffer');
 
 const tmpdir = require('../common/tmpdir');
-const testfile = path.join(tmpdir.path, 'test-file-backed-blob.txt');
-const testfile2 = path.join(tmpdir.path, 'test-file-backed-blob2.txt');
-const testfile3 = path.join(tmpdir.path, 'test-file-backed-blob3.txt');
+const testfile = tmpdir.resolve('test-file-backed-blob.txt');
+const testfile2 = tmpdir.resolve('test-file-backed-blob2.txt');
+const testfile3 = tmpdir.resolve('test-file-backed-blob3.txt');
 tmpdir.refresh();
 
 const data = `${'a'.repeat(1000)}${'b'.repeat(2000)}`;
@@ -68,6 +68,23 @@ writeFileSync(testfile3, '');
 })().then(common.mustCall());
 
 (async () => {
+  // Refs: https://github.com/nodejs/node/issues/47683
+  const blob = await openAsBlob(testfile);
+  const res = blob.slice(10, 20);
+  const ab = await res.arrayBuffer();
+  strictEqual(res.size, ab.byteLength);
+
+  let length = 0;
+  const stream = await res.stream();
+  for await (const chunk of stream)
+    length += chunk.length;
+  strictEqual(res.size, length);
+
+  const res1 = blob.slice(995, 1005);
+  strictEqual(await res1.text(), data.slice(995, 1005));
+})().then(common.mustCall());
+
+(async () => {
   const blob = await openAsBlob(testfile2);
   const stream = blob.stream();
   const read = async () => {
@@ -98,4 +115,15 @@ writeFileSync(testfile3, '');
   const stream = blob.stream();
   const reader = stream.getReader();
   await rejects(() => reader.read(), { name: 'NotReadableError' });
+})().then(common.mustCall());
+
+(async () => {
+  // We currently do not allow File-backed blobs to be cloned or transfered
+  // across worker threads. This is largely because the underlying FdEntry
+  // is bound to the Environment/Realm under which is was created.
+  const blob = await openAsBlob(__filename);
+  throws(() => structuredClone(blob), {
+    code: 'ERR_INVALID_STATE',
+    message: 'Invalid state: File-backed Blobs are not cloneable'
+  });
 })().then(common.mustCall());

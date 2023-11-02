@@ -72,7 +72,21 @@
         'v8_enable_etw_stack_walking': 1,
       }, {
         'v8_enable_etw_stack_walking': 0,
-      }]
+      }],
+      ['OS=="linux"', {
+        # Sets -dV8_ENABLE_PRIVATE_MAPPING_FORK_OPTIMIZATION.
+        #
+        # This flag speeds up the performance of fork/execve on Linux systems for
+        # embedders which use it (like Node.js). It works by marking the pages that
+        # V8 allocates as MADV_DONTFORK. Without MADV_DONTFORK, the Linux kernel
+        # spends a long time manipulating page mappings on fork and exec which the
+        # child process doesn't generally need to access.
+        #
+        # See v8:7381 for more details.
+        'v8_enable_private_mapping_fork_optimization': 1,
+      }, {
+        'v8_enable_private_mapping_fork_optimization': 0,
+      }],
     ],
     'is_debug%': 0,
 
@@ -266,6 +280,10 @@
     # Sets -DV8_USE_ZLIB
     'v8_use_zlib%': 1,
 
+    # Whether custom embedder snapshots may extend (= allocate new objects in)
+    # ReadOnlySpace.
+    'v8_enable_extensible_ro_snapshot%': 1,
+
     # Variables from v8.gni
 
     # Enable ECMAScript Internationalization API. Enabling this feature will
@@ -319,6 +337,9 @@
       }],
       ['v8_enable_hugepage==1', {
         'defines': ['ENABLE_HUGEPAGE',],
+      }],
+      ['v8_enable_private_mapping_fork_optimization==1', {
+        'defines': ['V8_ENABLE_PRIVATE_MAPPING_FORK_OPTIMIZATION'],
       }],
       ['v8_enable_vtunejit==1', {
         'defines': ['ENABLE_VTUNE_JIT_INTERFACE',],
@@ -442,6 +463,9 @@
       }],
       ['v8_use_zlib==1', {
         'defines': ['V8_USE_ZLIB',],
+      }],
+      ['v8_enable_extensible_ro_snapshot==1', {
+        'defines': ['V8_ENABLE_EXTENSIBLE_RO_SNAPSHOT',],
       }],
       ['v8_enable_precise_zone_stats==1', {
         'defines': ['V8_ENABLE_PRECISE_ZONE_STATS',],

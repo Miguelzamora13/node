@@ -63,10 +63,14 @@
 
 namespace node {
 
+using v8::Context;
+using v8::Isolate;
 using v8::Local;
+using v8::Null;
 using v8::Object;
+using v8::Value;
 
-namespace {
+namespace constants {
 
 void DefineErrnoConstants(Local<Object> target) {
 #ifdef E2BIG
@@ -1054,6 +1058,10 @@ void DefineSystemConstants(Local<Object> target) {
   NODE_DEFINE_CONSTANT(target, UV_DIRENT_CHAR);
   NODE_DEFINE_CONSTANT(target, UV_DIRENT_BLOCK);
 
+  // Define module specific constants
+  NODE_DEFINE_CONSTANT(target, EXTENSIONLESS_FORMAT_JAVASCRIPT);
+  NODE_DEFINE_CONSTANT(target, EXTENSIONLESS_FORMAT_WASM);
+
   NODE_DEFINE_CONSTANT(target, S_IFMT);
   NODE_DEFINE_CONSTANT(target, S_IFREG);
   NODE_DEFINE_CONSTANT(target, S_IFDIR);
@@ -1270,10 +1278,14 @@ void DefineTraceConstants(Local<Object> target) {
   NODE_DEFINE_CONSTANT(target, TRACE_EVENT_PHASE_LINK_IDS);
 }
 
-}  // anonymous namespace
+void CreatePerContextProperties(Local<Object> target,
+                                Local<Value> unused,
+                                Local<Context> context,
+                                void* priv) {
+  Isolate* isolate = context->GetIsolate();
+  Environment* env = Environment::GetCurrent(context);
 
-void DefineConstants(v8::Isolate* isolate, Local<Object> target) {
-  Environment* env = Environment::GetCurrent(isolate);
+  CHECK(target->SetPrototype(env->context(), Null(env->isolate())).FromJust());
 
   Local<Object> os_constants = Object::New(isolate);
   CHECK(os_constants->SetPrototype(env->context(),
@@ -1353,4 +1365,8 @@ void DefineConstants(v8::Isolate* isolate, Local<Object> target) {
               trace_constants).Check();
 }
 
+}  // namespace constants
 }  // namespace node
+
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(constants,
+                                    node::constants::CreatePerContextProperties)

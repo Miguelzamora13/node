@@ -36,7 +36,7 @@
 
     # Reset this number to 0 on major V8 upgrades.
     # Increment by one for each non-official patch applied to deps/v8.
-    'v8_embedder_string': '-node.3',
+    'v8_embedder_string': '-node.14',
 
     ##### V8 defaults for Node.js #####
 
@@ -230,7 +230,7 @@
             ],
           },],
           ['OS == "android"', {
-            'cflags': [ '-fPIC' ],
+            'cflags': [ '-fPIC', '-I<(android_ndk_path)/sources/android/cpufeatures' ],
             'ldflags': [ '-fPIC' ]
           }],
         ],
@@ -411,28 +411,56 @@
             'cflags': [ '-I/usr/local/include' ],
             'ldflags': [ '-Wl,-z,wxneeded' ],
           }],
+          ['_toolset=="host"', {
+            'conditions': [
+              [ 'host_arch=="ia32"', {
+                'cflags': [ '-m32' ],
+                'ldflags': [ '-m32' ],
+              }],
+              [ 'host_arch=="x64"', {
+                'cflags': [ '-m64' ],
+                'ldflags': [ '-m64' ],
+              }],
+              [ 'host_arch=="ppc" and OS not in "aix os400"', {
+                'cflags': [ '-m32' ],
+                'ldflags': [ '-m32' ],
+              }],
+              [ 'host_arch=="ppc64" and OS not in "aix os400"', {
+                'cflags': [ '-m64', '-mminimal-toc' ],
+                'ldflags': [ '-m64' ],
+              }],
+              [ 'host_arch=="s390x" and OS=="linux"', {
+                'cflags': [ '-m64', '-march=z196' ],
+                'ldflags': [ '-m64', '-march=z196' ],
+              }],
+            ],
+          }],
+          ['_toolset=="target"', {
+            'conditions': [
+              [ 'target_arch=="ia32"', {
+                'cflags': [ '-m32' ],
+                'ldflags': [ '-m32' ],
+              }],
+              [ 'target_arch=="x64"', {
+                'cflags': [ '-m64' ],
+                'ldflags': [ '-m64' ],
+              }],
+              [ 'target_arch=="ppc" and OS not in "aix os400"', {
+                'cflags': [ '-m32' ],
+                'ldflags': [ '-m32' ],
+              }],
+              [ 'target_arch=="ppc64" and OS not in "aix os400"', {
+                'cflags': [ '-m64', '-mminimal-toc' ],
+                'ldflags': [ '-m64' ],
+              }],
+              [ 'target_arch=="s390x" and OS=="linux"', {
+                'cflags': [ '-m64', '-march=z196' ],
+                'ldflags': [ '-m64', '-march=z196' ],
+              }],
+            ],
+          }],
         ],
         'conditions': [
-          [ 'target_arch=="ia32"', {
-            'cflags': [ '-m32' ],
-            'ldflags': [ '-m32' ],
-          }],
-          [ 'target_arch=="x64"', {
-            'cflags': [ '-m64' ],
-            'ldflags': [ '-m64' ],
-          }],
-          [ 'target_arch=="ppc" and OS not in "aix os400"', {
-            'cflags': [ '-m32' ],
-            'ldflags': [ '-m32' ],
-          }],
-          [ 'target_arch=="ppc64" and OS not in "aix os400"', {
-            'cflags': [ '-m64', '-mminimal-toc' ],
-            'ldflags': [ '-m64' ],
-          }],
-          [ 'target_arch=="s390x" and OS=="linux"', {
-            'cflags': [ '-m64', '-march=z196' ],
-            'ldflags': [ '-m64', '-march=z196' ],
-          }],
           [ 'OS=="solaris"', {
             'cflags': [ '-pthreads' ],
             'ldflags': [ '-pthreads' ],
@@ -500,7 +528,7 @@
           'GCC_ENABLE_CPP_RTTI': 'NO',              # -fno-rtti
           'GCC_ENABLE_PASCAL_STRINGS': 'NO',        # No -mpascal-strings
           'PREBINDING': 'NO',                       # No -Wl,-prebind
-          'MACOSX_DEPLOYMENT_TARGET': '10.15',      # -mmacosx-version-min=10.15
+          'MACOSX_DEPLOYMENT_TARGET': '11.0',       # -mmacosx-version-min=11.0
           'USE_HEADERMAP': 'NO',
           'OTHER_CFLAGS': [
             '-fno-strict-aliasing',

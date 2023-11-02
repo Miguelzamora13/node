@@ -84,8 +84,18 @@ const uint32_t kLenientNone = 0;
 const uint32_t kLenientHeaders = 1 << 0;
 const uint32_t kLenientChunkedLength = 1 << 1;
 const uint32_t kLenientKeepAlive = 1 << 2;
-const uint32_t kLenientAll = kLenientHeaders | kLenientChunkedLength |
-  kLenientKeepAlive;
+const uint32_t kLenientTransferEncoding = 1 << 3;
+const uint32_t kLenientVersion = 1 << 4;
+const uint32_t kLenientDataAfterClose = 1 << 5;
+const uint32_t kLenientOptionalLFAfterCR = 1 << 6;
+const uint32_t kLenientOptionalCRLFAfterChunk = 1 << 7;
+const uint32_t kLenientOptionalCRBeforeLF = 1 << 8;
+const uint32_t kLenientSpacesAfterChunkSize = 1 << 9;
+const uint32_t kLenientAll =
+    kLenientHeaders | kLenientChunkedLength | kLenientKeepAlive |
+    kLenientTransferEncoding | kLenientVersion | kLenientDataAfterClose |
+    kLenientOptionalLFAfterCR | kLenientOptionalCRLFAfterChunk |
+    kLenientOptionalCRBeforeLF | kLenientSpacesAfterChunkSize;
 
 inline bool IsOWS(char c) {
   return c == ' ' || c == '\t';
@@ -930,6 +940,27 @@ class Parser : public AsyncWrap, public StreamListener {
     if (lenient_flags & kLenientKeepAlive) {
       llhttp_set_lenient_keep_alive(&parser_, 1);
     }
+    if (lenient_flags & kLenientTransferEncoding) {
+      llhttp_set_lenient_transfer_encoding(&parser_, 1);
+    }
+    if (lenient_flags & kLenientVersion) {
+      llhttp_set_lenient_version(&parser_, 1);
+    }
+    if (lenient_flags & kLenientDataAfterClose) {
+      llhttp_set_lenient_data_after_close(&parser_, 1);
+    }
+    if (lenient_flags & kLenientOptionalLFAfterCR) {
+      llhttp_set_lenient_optional_lf_after_cr(&parser_, 1);
+    }
+    if (lenient_flags & kLenientOptionalCRLFAfterChunk) {
+      llhttp_set_lenient_optional_crlf_after_chunk(&parser_, 1);
+    }
+    if (lenient_flags & kLenientOptionalCRBeforeLF) {
+      llhttp_set_lenient_optional_cr_before_lf(&parser_, 1);
+    }
+    if (lenient_flags & kLenientSpacesAfterChunkSize) {
+      llhttp_set_lenient_spaces_after_chunk_size(&parser_, 1);
+    }
 
     header_nread_ = 0;
     url_.Reset();
@@ -1106,11 +1137,22 @@ void ConnectionsList::Expired(const FunctionCallbackInfo<Value>& args) {
     std::swap(headers_timeout, request_timeout);
   }
 
+  // On IoT or embedded devices the uv_hrtime() may return the timestamp
+  // that is smaller than configured timeout for headers or request
+  // to prevent subtracting two unsigned integers
+  // that can yield incorrect results we should check
+  // if the 'now' is bigger than the timeout for headers or request
   const uint64_t now = uv_hrtime();
   const uint64_t headers_deadline =
-    headers_timeout > 0 ? now - headers_timeout : 0;
+      (headers_timeout > 0 && now > headers_timeout) ? now - headers_timeout
+                                                     : 0;
   const uint64_t request_deadline =
-    request_timeout > 0 ? now - request_timeout : 0;
+      (request_timeout > 0 && now > request_timeout) ? now - request_timeout
+                                                     : 0;
+
+  if (headers_deadline == 0 && request_deadline == 0) {
+    return args.GetReturnValue().Set(Array::New(isolate, 0));
+  }
 
   auto iter = list->active_connections_.begin();
   auto end = list->active_connections_.end();
@@ -1192,8 +1234,7 @@ void InitializeHttpParser(Local<Object> target,
   Realm* realm = Realm::GetCurrent(context);
   Environment* env = realm->env();
   Isolate* isolate = env->isolate();
-  BindingData* const binding_data =
-      realm->AddBindingData<BindingData>(context, target);
+  BindingData* const binding_data = realm->AddBindingData<BindingData>(target);
   if (binding_data == nullptr) return;
 
   Local<FunctionTemplate> t = NewFunctionTemplate(isolate, Parser::New);
@@ -1226,6 +1267,23 @@ void InitializeHttpParser(Local<Object> target,
          Integer::NewFromUnsigned(env->isolate(), kLenientChunkedLength));
   t->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "kLenientKeepAlive"),
          Integer::NewFromUnsigned(env->isolate(), kLenientKeepAlive));
+  t->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "kLenientTransferEncoding"),
+         Integer::NewFromUnsigned(env->isolate(), kLenientTransferEncoding));
+  t->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "kLenientVersion"),
+         Integer::NewFromUnsigned(env->isolate(), kLenientVersion));
+  t->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "kLenientDataAfterClose"),
+         Integer::NewFromUnsigned(env->isolate(), kLenientDataAfterClose));
+  t->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "kLenientOptionalLFAfterCR"),
+         Integer::NewFromUnsigned(env->isolate(), kLenientOptionalLFAfterCR));
+  t->Set(
+      FIXED_ONE_BYTE_STRING(env->isolate(), "kLenientOptionalCRLFAfterChunk"),
+      Integer::NewFromUnsigned(env->isolate(), kLenientOptionalCRLFAfterChunk));
+  t->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "kLenientOptionalCRBeforeLF"),
+         Integer::NewFromUnsigned(env->isolate(), kLenientOptionalCRBeforeLF));
+  t->Set(
+      FIXED_ONE_BYTE_STRING(env->isolate(), "kLenientSpacesAfterChunkSize"),
+      Integer::NewFromUnsigned(env->isolate(), kLenientSpacesAfterChunkSize));
+
   t->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "kLenientAll"),
          Integer::NewFromUnsigned(env->isolate(), kLenientAll));
 

@@ -54,20 +54,21 @@
 #include "util-inl.h"
 #include "v8.h"
 
-#include <unicode/utypes.h>
 #include <unicode/putil.h>
+#include <unicode/timezone.h>
 #include <unicode/uchar.h>
 #include <unicode/uclean.h>
+#include <unicode/ucnv.h>
 #include <unicode/udata.h>
 #include <unicode/uidna.h>
-#include <unicode/ucnv.h>
-#include <unicode/utf8.h>
-#include <unicode/utf16.h>
-#include <unicode/timezone.h>
 #include <unicode/ulocdata.h>
+#include <unicode/urename.h>
+#include <unicode/ustring.h>
+#include <unicode/utf16.h>
+#include <unicode/utf8.h>
+#include <unicode/utypes.h>
 #include <unicode/uvernum.h>
 #include <unicode/uversion.h>
-#include <unicode/ustring.h>
 
 #ifdef NODE_HAVE_SMALL_ICU
 /* if this is defined, we have a 'secondary' entry point.
@@ -569,8 +570,7 @@ ConverterObject::ConverterObject(
   }
 }
 
-
-bool InitializeICUDirectory(const std::string& path) {
+bool InitializeICUDirectory(const std::string& path, std::string* error) {
   UErrorCode status = U_ZERO_ERROR;
   if (path.empty()) {
 #ifdef NODE_HAVE_SMALL_ICU
@@ -583,7 +583,12 @@ bool InitializeICUDirectory(const std::string& path) {
     u_setDataDirectory(path.c_str());
     u_init(&status);
   }
-  return status == U_ZERO_ERROR;
+  if (status == U_ZERO_ERROR) {
+    return true;
+  }
+
+  *error = u_errorName(status);
+  return false;
 }
 
 void SetDefaultTimeZone(const char* tzid) {
@@ -860,17 +865,16 @@ static void GetStringWidth(const FunctionCallbackInfo<Value>& args) {
 }
 
 static void CreatePerIsolateProperties(IsolateData* isolate_data,
-                                       Local<FunctionTemplate> target) {
+                                       Local<ObjectTemplate> target) {
   Isolate* isolate = isolate_data->isolate();
-  Local<ObjectTemplate> proto = target->PrototypeTemplate();
 
-  SetMethod(isolate, proto, "toUnicode", ToUnicode);
-  SetMethod(isolate, proto, "toASCII", ToASCII);
-  SetMethod(isolate, proto, "getStringWidth", GetStringWidth);
+  SetMethod(isolate, target, "toUnicode", ToUnicode);
+  SetMethod(isolate, target, "toASCII", ToASCII);
+  SetMethod(isolate, target, "getStringWidth", GetStringWidth);
 
   // One-shot converters
-  SetMethod(isolate, proto, "icuErrName", ICUErrorName);
-  SetMethod(isolate, proto, "transcode", Transcode);
+  SetMethod(isolate, target, "icuErrName", ICUErrorName);
+  SetMethod(isolate, target, "transcode", Transcode);
 
   // ConverterObject
   {
@@ -883,9 +887,9 @@ static void CreatePerIsolateProperties(IsolateData* isolate_data,
     isolate_data->set_i18n_converter_template(t->InstanceTemplate());
   }
 
-  SetMethod(isolate, proto, "getConverter", ConverterObject::Create);
-  SetMethod(isolate, proto, "decode", ConverterObject::Decode);
-  SetMethod(isolate, proto, "hasConverter", ConverterObject::Has);
+  SetMethod(isolate, target, "getConverter", ConverterObject::Create);
+  SetMethod(isolate, target, "decode", ConverterObject::Decode);
+  SetMethod(isolate, target, "hasConverter", ConverterObject::Has);
 }
 
 void CreatePerContextProperties(Local<Object> target,

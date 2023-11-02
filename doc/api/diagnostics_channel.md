@@ -235,7 +235,7 @@ diagnostics_channel.unsubscribe('my-channel', onMessage);
 
 <!-- YAML
 added:
- - REPLACEME
+ - v19.9.0
 -->
 
 > Stability: 1 - Experimental
@@ -465,7 +465,7 @@ channel.unsubscribe(onMessage);
 
 <!-- YAML
 added:
- - REPLACEME
+ - v19.9.0
 -->
 
 > Stability: 1 - Experimental
@@ -509,7 +509,7 @@ channel.bindStore(store, (data) => {
 
 <!-- YAML
 added:
- - REPLACEME
+ - v19.9.0
 -->
 
 > Stability: 1 - Experimental
@@ -548,7 +548,7 @@ channel.unbindStore(store);
 
 <!-- YAML
 added:
- - REPLACEME
+ - v19.9.0
 -->
 
 > Stability: 1 - Experimental
@@ -567,7 +567,7 @@ applied to transform the message data before it becomes the context value for
 the store. The prior storage context is accessible from within the transform
 function in cases where context linking is required.
 
-The context applied to the store should be accesible in any async code which
+The context applied to the store should be accessible in any async code which
 continues from execution which began during the given function, however
 there are some situations in which [context loss][] may occur.
 
@@ -609,7 +609,7 @@ channel.runStores({ some: 'message' }, () => {
 
 <!-- YAML
 added:
- - REPLACEME
+ - v19.9.0
 -->
 
 > Stability: 1 - Experimental
@@ -626,7 +626,7 @@ dynamically.
 
 <!-- YAML
 added:
- - REPLACEME
+ - v19.9.0
 -->
 
 > Stability: 1 - Experimental
@@ -694,7 +694,7 @@ channels.subscribe({
 
 <!-- YAML
 added:
- - REPLACEME
+ - v19.9.0
 -->
 
 > Stability: 1 - Experimental
@@ -764,7 +764,7 @@ channels.unsubscribe({
 
 <!-- YAML
 added:
- - REPLACEME
+ - v19.9.0
 -->
 
 > Stability: 1 - Experimental
@@ -809,7 +809,7 @@ channels.traceSync(() => {
 
 <!-- YAML
 added:
- - REPLACEME
+ - v19.9.0
 -->
 
 > Stability: 1 - Experimental
@@ -857,7 +857,7 @@ channels.tracePromise(async () => {
 
 <!-- YAML
 added:
- - REPLACEME
+ - v19.9.0
 -->
 
 > Stability: 1 - Experimental
@@ -956,7 +956,7 @@ channels.asyncStart.bindStore(myStore, (data) => {
 
 A TracingChannel is a collection of several diagnostics\_channels representing
 specific points in the execution lifecycle of a single traceable action. The
-behaviour is split into five diagnostics\_channels consisting of `start`,
+behavior is split into five diagnostics\_channels consisting of `start`,
 `end`, `asyncStart`, `asyncEnd`, and `error`. A single traceable action will
 share the same event object between all events, this can be helpful for
 managing correlation through a weakmap.

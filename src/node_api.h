@@ -1,11 +1,11 @@
 #ifndef SRC_NODE_API_H_
 #define SRC_NODE_API_H_
 
-#ifdef BUILDING_NODE_EXTENSION
+#if defined(BUILDING_NODE_EXTENSION) && !defined(NAPI_EXTERN)
 #ifdef _WIN32
 // Building native addon against node
 #define NAPI_EXTERN __declspec(dllimport)
-#elif defined(__wasm32__)
+#elif defined(__wasm__)
 #define NAPI_EXTERN __attribute__((__import_module__("napi")))
 #endif
 #endif
@@ -17,7 +17,12 @@ struct uv_loop_s;  // Forward declaration.
 #ifdef _WIN32
 #define NAPI_MODULE_EXPORT __declspec(dllexport)
 #else
+#ifdef __EMSCRIPTEN__
+#define NAPI_MODULE_EXPORT                                                     \
+  __attribute__((visibility("default"))) __attribute__((used))
+#else
 #define NAPI_MODULE_EXPORT __attribute__((visibility("default")))
+#endif
 #endif
 
 #if defined(__GNUC__)
@@ -30,6 +35,7 @@ struct uv_loop_s;  // Forward declaration.
 
 typedef napi_value(NAPI_CDECL* napi_addon_register_func)(napi_env env,
                                                          napi_value exports);
+typedef int32_t(NAPI_CDECL* node_api_addon_get_api_version_func)(void);
 
 // Used by deprecated registration method napi_module_register.
 typedef struct napi_module {
@@ -48,17 +54,26 @@ typedef struct napi_module {
   NAPI_MODULE_INITIALIZER_X_HELPER(base, version)
 #define NAPI_MODULE_INITIALIZER_X_HELPER(base, version) base##version
 
-#ifdef __wasm32__
+#ifdef __wasm__
 #define NAPI_MODULE_INITIALIZER_BASE napi_register_wasm_v
 #else
 #define NAPI_MODULE_INITIALIZER_BASE napi_register_module_v
 #endif
 
+#define NODE_API_MODULE_GET_API_VERSION_BASE node_api_module_get_api_version_v
+
 #define NAPI_MODULE_INITIALIZER                                                \
   NAPI_MODULE_INITIALIZER_X(NAPI_MODULE_INITIALIZER_BASE, NAPI_MODULE_VERSION)
 
+#define NODE_API_MODULE_GET_API_VERSION                                        \
+  NAPI_MODULE_INITIALIZER_X(NODE_API_MODULE_GET_API_VERSION_BASE,              \
+                            NAPI_MODULE_VERSION)
+
 #define NAPI_MODULE_INIT()                                                     \
   EXTERN_C_START                                                               \
+  NAPI_MODULE_EXPORT int32_t NODE_API_MODULE_GET_API_VERSION(void) {           \
+    return NAPI_VERSION;                                                       \
+  }                                                                            \
   NAPI_MODULE_EXPORT napi_value NAPI_MODULE_INITIALIZER(napi_env env,          \
                                                         napi_value exports);   \
   EXTERN_C_END                                                                 \
@@ -133,7 +148,6 @@ NAPI_EXTERN napi_status NAPI_CDECL napi_get_buffer_info(napi_env env,
                                                         void** data,
                                                         size_t* length);
 
-#ifndef __wasm32__
 // Methods to manage simple async operations
 NAPI_EXTERN napi_status NAPI_CDECL
 napi_create_async_work(napi_env env,
@@ -149,7 +163,6 @@ NAPI_EXTERN napi_status NAPI_CDECL napi_queue_async_work(napi_env env,
                                                          napi_async_work work);
 NAPI_EXTERN napi_status NAPI_CDECL napi_cancel_async_work(napi_env env,
                                                           napi_async_work work);
-#endif  // __wasm32__
 
 // version management
 NAPI_EXTERN napi_status NAPI_CDECL
@@ -187,7 +200,6 @@ napi_close_callback_scope(napi_env env, napi_callback_scope scope);
 
 #if NAPI_VERSION >= 4
 
-#ifndef __wasm32__
 // Calling into JS from other threads
 NAPI_EXTERN napi_status NAPI_CDECL
 napi_create_threadsafe_function(napi_env env,
@@ -221,7 +233,6 @@ napi_unref_threadsafe_function(napi_env env, napi_threadsafe_function func);
 
 NAPI_EXTERN napi_status NAPI_CDECL
 napi_ref_threadsafe_function(napi_env env, napi_threadsafe_function func);
-#endif  // __wasm32__
 
 #endif  // NAPI_VERSION >= 4
 
@@ -238,12 +249,12 @@ napi_remove_async_cleanup_hook(napi_async_cleanup_hook_handle remove_handle);
 
 #endif  // NAPI_VERSION >= 8
 
-#ifdef NAPI_EXPERIMENTAL
+#if NAPI_VERSION >= 9
 
 NAPI_EXTERN napi_status NAPI_CDECL
 node_api_get_module_file_name(napi_env env, const char** result);
 
-#endif  // NAPI_EXPERIMENTAL
+#endif  // NAPI_VERSION >= 9
 
 EXTERN_C_END
 
